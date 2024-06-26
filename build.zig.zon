@@ -1,0 +1,18 @@
+.{
+    .name = "coreutils",
+    .version = "0.0.0",
+
+    .minimum_zig_version = "0.12.0",
+    .dependencies = .{
+        // For executing WASM
+        .zware = .{
+            //.path = "zware",
+            .url = "https://github.com/malcolmstill/zware/archive/6f875c1bdaa8e4c25e1269ad60fe3acb8e4a6b6e.tar.gz",
+            .hash = "1220bf2e61ff94f4a1a9ffd6ee1bc14b462c769e3a17394895dd2ca11e6e4536d7dc",
+        },
+    },
+
+    .paths = .{
+        "",
+    },
+}
