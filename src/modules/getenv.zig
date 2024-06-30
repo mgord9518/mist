@@ -1,14 +1,14 @@
 const std = @import("std");
 const core = @import("../main.zig");
+const fg = core.fg;
 const builtin = @import("builtin");
 
-pub const exec_mode: core.ExecMode = .function;
+pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
     .description = "print an environment variable to stdout",
-    .usage = "{0s}",
-    .options = &.{},
-    .exit_codes = &.{},
+    .usage = "[" ++ fg(.cyan) ++ "STRING" ++
+        fg(.default) ++ "]",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {

@@ -2,8 +2,6 @@ const std = @import("std");
 const core = @import("../../../main.zig");
 const fg = core.fg;
 
-const allocator = std.heap.page_allocator;
-
 pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
@@ -11,16 +9,13 @@ pub const help = core.Help{
     .usage = "{0s} [" ++
         fg(.cyan) ++ "EXIT_CODE" ++
         fg(.default) ++ "]",
-    .options = &.{
-        //        .{ .flag = 'u', .description = "print UID" },
-    },
-    .exit_codes = &.{},
 };
 
-pub fn main(arguments: []const core.Argument) u8 {
+// TODO: specify exit code
+pub fn main(arguments: []const core.Argument) core.Error {
     _ = arguments;
 
-    setTerminalToNormalMode() catch return 1;
+    setTerminalToNormalMode() catch return .unknown_error;
 
     // TODO: use exit code
     std.posix.exit(0);

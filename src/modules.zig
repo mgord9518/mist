@@ -1,15 +1,18 @@
 // In this file modules may be enabled or disabled
 
+pub const mist = @import("modules/shell.zig");
 pub const clear = @import("modules/clear.zig");
 pub const id = @import("modules/id.zig");
 pub const yes = @import("modules/yes.zig");
 pub const reset = @import("modules/reset.zig");
-pub const shell = @import("modules/shell.zig");
 pub const ls = @import("modules/ls.zig");
 pub const print = @import("modules/print.zig");
 pub const getenv = @import("modules/getenv.zig");
 
 // Shell builtins
+pub const @"#" = @import("modules/shell/builtins/#.zig");
+pub const @"#!" = @import("modules/shell/builtins/#.zig");
+
 pub const cd = @import("modules/shell/builtins/cd.zig");
 pub const commands = @import("modules/shell/builtins/commands.zig");
 pub const exit = @import("modules/shell/builtins/exit.zig");

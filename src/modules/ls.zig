@@ -7,11 +7,7 @@ const S = std.posix.S;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description =
-    \\list files in a directory
-    \\
-    \\if no [DIRECTORY] is specified, list the working directory
-    ,
+    .description = "list files in a directory",
     .usage = "[" ++
         fg(.cyan) ++ "-aU" ++
         fg(.default) ++ "] [" ++
@@ -21,14 +17,19 @@ pub const help = core.Help{
         .{ .flag = 'a', .description = "show hidden files" },
         .{ .flag = 'l', .description = "format in long mode" },
         .{ .flag = 'U', .description = "do not sort output" },
+        .{ .flag = 'r', .description = "sort in reverse order" },
         .{ .flag = '1', .description = "force single-column output" },
     },
-    .exit_codes = &.{},
 };
 
 const Entry = struct {
+    // The color is a compile-time string, either 5 or 6 bytes long
+    color: []const u8,
+
+    // Path is allocated, must be freed after use
     path: []const u8,
-    stat: std.posix.Stat,
+
+    stat: ?std.fs.File.Stat,
     kind: std.fs.File.Kind,
 };
 
@@ -43,6 +44,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     var single_column = false;
     var show_hidden = false;
     var sort = true;
+    var rev_sort = false;
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
@@ -50,6 +52,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
             'a' => show_hidden = true,
             'l' => long = true,
             'U' => sort = false,
+            'r' => rev_sort = true,
             '1' => single_column = true,
 
             else => return .usage_error,
@@ -86,34 +89,41 @@ pub fn main(arguments: []const core.Argument) core.Error {
     var it = dir.iterate();
     while (it.next() catch return .unknown_error) |entry| {
         if (!show_hidden and entry.name[0] == '.') continue;
-        const file_name = std.fmt.allocPrint(allocator, "{s}{s}", .{
-            switch (entry.kind) {
-                .directory => fg(.bright_blue),
-                // TODO: detect broken links
-                .sym_link => fg(.cyan),
-                .character_device, .block_device => fg(.yellow),
-                else => blk: {
-                    const stat = cwd.statFile(entry.name) catch {
-                        break :blk fg(.default);
-                    };
-                    const can_exec = (stat.mode & S.IXUSR) |
-                        (stat.mode & S.IXGRP) |
-                        (stat.mode & S.IXOTH) > 0;
-                    if (can_exec) {
-                        break :blk fg(.bright_green);
-                    }
+
+        const stat = dir.statFile(entry.name) catch blk: {
+            break :blk null;
+        };
+
+        const color = switch (entry.kind) {
+            .directory => fg(.bright_blue),
+
+            // TODO: detect broken links
+            .sym_link => fg(.cyan),
+            .character_device, .block_device => fg(.yellow),
+            else => blk: {
+                const st = stat orelse {
                     break :blk fg(.default);
-                },
+                };
+
+                const can_exec = (st.mode & S.IXUSR) |
+                    (st.mode & S.IXGRP) |
+                    (st.mode & S.IXOTH) > 0;
+                if (can_exec) {
+                    break :blk fg(.bright_green);
+                }
+                break :blk fg(.default);
             },
-            entry.name,
-        }) catch return .unknown_error;
+        };
+
+        const file_name = allocator.dupe(u8, entry.name) catch unreachable;
 
         longest = @max(longest, entry.name.len);
 
         file_list.append(.{
             .kind = entry.kind,
+            .color = color,
             .path = file_name,
-            .stat = undefined,
+            .stat = stat,
         }) catch return .unknown_error;
     }
 
@@ -121,18 +131,14 @@ pub fn main(arguments: []const core.Argument) core.Error {
         std.mem.sort(
             Entry,
             file_list.items,
-            @as(usize, 6),
-            asc,
+            @as(SortContext, .{
+                .order = .alphabetic,
+                .reverse = rev_sort,
+            }),
+            sortFn,
         );
     }
 
-    // TODO: MOVE TO CURSES
-    //    var ioctl: std.posix.system.winsize = undefined;
-    //    _ = std.posix.system.ioctl(
-    //        std.posix.STDOUT_FILENO,
-    //        std.posix.T.IOCGWINSZ,
-    //        @intFromPtr(&ioctl),
-    //    );
     const size = curses.terminalSize();
 
     const col_width = longest + 2;
@@ -160,8 +166,13 @@ pub fn main(arguments: []const core.Argument) core.Error {
             if (long) {
                 var mode: std.posix.mode_t = 0;
 
+                if (entry.stat) |stat| {
+                    mode = stat.mode;
+                }
+
                 stat_blk: {
-                    const stat = cwd.statFile(entry.path[6..]) catch break :stat_blk;
+                    const stat = dir.statFile(entry.path) catch break :stat_blk;
+                    //_ = stat;
                     mode = stat.mode;
                 }
 
@@ -181,17 +192,25 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     break :blk 'l';
                 } else if (S.ISSOCK(mode)) blk: {
                     break :blk 's';
-                } else '.';
+                } else '!';
 
-                stdout.print(fg(.default) ++ "{s}{o:0<3} ", .{
+                const sz = if (entry.stat) |stat| blk: {
+                    break :blk stat.size;
+                } else 0;
+
+                stdout.print(fg(.default) ++ "{s} {o:0<3} {:>6.2} ", .{
                     st_buf[0..1],
                     mode & 0o777,
+                    fmtIntSizeDec(sz),
                 }) catch return .unknown_error;
             }
 
             curses.move(.right, col * col_width);
 
-            stdout.print("{s}\n", .{entry.path}) catch return .unknown_error;
+            stdout.print("{s}{s}\n", .{
+                entry.color,
+                entry.path,
+            }) catch return .unknown_error;
 
             idx += 1;
         }
@@ -204,25 +223,117 @@ pub fn main(arguments: []const core.Argument) core.Error {
     } else {
         idx += 1;
         for (file_list.items) |entry| {
-            stdout.print("{s}\n", .{entry.path[6..]}) catch return .unknown_error;
+            stdout.print("{s}\n", .{entry.path}) catch return .unknown_error;
         }
     }
 
     return .success;
 }
 
+const SortContext = struct {
+    reverse: bool = false,
+    order: Order,
+
+    const Order = enum {
+        alphabetic,
+        size,
+    };
+};
+
+fn sortFn(ctx: SortContext, a: Entry, b: Entry) bool {
+    const ret = switch (ctx.order) {
+        .alphabetic => sortByAlphabet({}, a, b),
+        .size => sortBySize({}, a, b),
+    };
+
+    if (ctx.reverse) return !ret;
+
+    return ret;
+}
+
+fn sortBySize(_: void, a: Entry, b: Entry) bool {
+    const sz_a = if (a.stat != null) a.stat.?.size else 0;
+    const sz_b = if (b.stat != null) b.stat.?.size else 0;
+
+    return sz_a > sz_b;
+}
+
+const formatSizeDec = formatSizeImpl(1000).formatSizeImpl;
+
+pub fn fmtIntSizeDec(value: u64) std.fmt.Formatter(formatSizeDec) {
+    return .{ .data = value };
+}
+
+// Copied and modified from <https://github.com/ziglang/zig/blob/master/lib/std/fmt.zig>
+fn formatSizeImpl(comptime base: comptime_int) type {
+    return struct {
+        fn formatSizeImpl(
+            value: u64,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            if (value == 0) {
+                return std.fmt.formatBuf("0B", options, writer);
+            }
+            // The worst case in terms of space needed is 32 bytes + 3 for the suffix.
+            var buf: [std.fmt.format_float.min_buffer_size + 3]u8 = undefined;
+
+            const mags_si = " kMGTPEZY";
+            const mags_iec = " KMGTPEZY";
+
+            const log2 = std.math.log2(value);
+            const magnitude = switch (base) {
+                1000 => @min(log2 / comptime std.math.log2(1000), mags_si.len - 1),
+                1024 => @min(log2 / 10, mags_iec.len - 1),
+                else => unreachable,
+            };
+            const new_value = std.math.lossyCast(f64, value) / std.math.pow(f64, std.math.lossyCast(f64, base), std.math.lossyCast(f64, magnitude));
+            const suffix = switch (base) {
+                1000 => mags_si[magnitude],
+                1024 => mags_iec[magnitude],
+                else => unreachable,
+            };
+
+            const s = switch (magnitude) {
+                0 => buf[0..std.fmt.formatIntBuf(&buf, value, 10, .lower, .{})],
+                else => std.fmt.formatFloat(&buf, new_value, .{ .mode = .decimal, .precision = options.precision }) catch |err| switch (err) {
+                    error.BufferTooSmall => unreachable,
+                },
+            };
+
+            var i: usize = s.len;
+            if (suffix == ' ') {
+                buf[i] = 'B';
+                buf[i + 1] = ' ';
+                i += 2;
+            } else switch (base) {
+                1000 => {
+                    buf[i..][0..2].* = [_]u8{ suffix, 'B' };
+                    i += 2;
+                },
+                1024 => {
+                    buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+                    i += 3;
+                },
+                else => unreachable,
+            }
+
+            return std.fmt.formatBuf(buf[0..i], options, writer);
+        }
+    };
+}
+
 /// Sorts UTF-8 strings ordered by lower to higher codepoints preferring
 /// shorter strings.
-fn asc(offset: usize, a: Entry, b: Entry) bool {
-    // Start at offset 6 to skip the ANSI color code,
-    // which is something like `\x1b[;31m`.
-    // We can use offset 6 because we ensure only 2-digit codes are ever used
+fn sortByAlphabet(_: void, a: Entry, b: Entry) bool {
     var utf8_view_a = std.unicode.Utf8View.init(
-        a.path[offset..],
+        a.path,
     ) catch return true;
 
     var utf8_view_b = std.unicode.Utf8View.init(
-        b.path[offset..],
+        b.path,
     ) catch return false;
 
     var it_a = utf8_view_a.iterator();

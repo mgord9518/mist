@@ -6,22 +6,16 @@ const time = @import("../../../time.zig");
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .function;
+pub const no_display = true;
 
-pub const help = core.Help{
-    .description = "print command prompt",
-    .usage = "",
-    .options = &.{},
-    .exit_codes = &.{},
-};
+const base_color = fg(.red);
 
-//const prompt = fg(.cyan) ++ "┃" ++ fg(.bright_blue) ++ " {s} " ++ fg(.cyan) ++ "┃ {s} " ++ fg(.cyan) ++ "┠╼" ++ fg(.default) ++ " ";
-//const prompt = fg(.cyan) ++ "╭┨ {s}{s} " ++ fg(.cyan) ++ "┃ {s} " ++ fg(.cyan) ++ "┃\n╰╼" ++ fg(.default) ++ " ";
-const prompt = fg(.default) ++ "┌┤ {s}{s} " ++ fg(.default) ++ "│ {d:0<2}:{d:0<2}:{d:0<2} " ++ fg(.default) ++ "│ {s}" ++ fg(.default) ++ " │\n└─" ++ fg(.default) ++ " ";
-//const prompt = fg(.default) ++ "╭┨ {s}{s} " ++ fg(.default) ++ "┃ {s} " ++ fg(.default) ++ "┠────────────────────────────────────────┨\n╰╼" ++ fg(.default) ++ " ";
+const prompt = base_color ++ "┌┤ {s}{s} " ++
+    base_color ++ "│" ++ fg(.default) ++ " {d:0>2}:{d:0>2}:{d:0>2} " ++
+    base_color ++ "│ {s}" ++
+    base_color ++ " │\n└─" ++ fg(.default) ++ " ";
 
-//const prompt = fg(.cyan) ++ "┌[" ++ fg(.bright_blue) ++ " {s} " ++ fg(.cyan) ++ "]─[ CODE ]\n└╼" ++ fg(.default) ++ " ";
-
-pub fn main(_: []const core.Argument) u8 {
+pub fn main(_: []const core.Argument) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -33,15 +27,16 @@ pub fn main(_: []const core.Argument) u8 {
     var colorized_path = std.ArrayList(u8).init(allocator);
     defer colorized_path.deinit();
 
-    const home = std.posix.getenv("HOME") orelse "";
-    //var path = std.fs.cwd().realpath(".", path_buf[6..]) catch return 1;
-    //var path = std.posix.getcwd(path_buf[6..]) catch return 1;
+    const home = posix.getenv("HOME") orelse "";
 
-    @memcpy(path_buf[0..shell.logical_path.len], shell.logical_path);
+    @memcpy(
+        path_buf[0..shell.logical_path.len],
+        shell.logical_path,
+    );
     var path = path_buf[0..shell.logical_path.len];
 
     const is_link = blk: {
-        _ = std.posix.readlink(path, &link_buf) catch |err| {
+        _ = posix.readlink(path, &link_buf) catch |err| {
             switch (err) {
                 error.NotLink => break :blk false,
                 else => break :blk true,
@@ -60,7 +55,7 @@ pub fn main(_: []const core.Argument) u8 {
 
     if (path.len >= home.len and std.mem.eql(u8, path[0..home.len], home)) {
         const is_link2 = blk: {
-            _ = std.posix.readlink(home, &link_buf) catch |err| {
+            _ = posix.readlink(home, &link_buf) catch |err| {
                 switch (err) {
                     error.NotLink => break :blk false,
                     else => break :blk true,
@@ -88,7 +83,7 @@ pub fn main(_: []const core.Argument) u8 {
                 s.ptr = name.path.ptr - home.len;
                 break :blk2 s;
             } else name.path;
-            _ = std.posix.readlink(real, &link_buf) catch |err| {
+            _ = posix.readlink(real, &link_buf) catch |err| {
                 switch (err) {
                     error.NotLink => break :blk false,
                     else => break :blk true,
@@ -100,26 +95,20 @@ pub fn main(_: []const core.Argument) u8 {
 
         const color = if (is_link2) fg(.cyan) else fg(.bright_blue);
 
-        //        _ = colorized_path.writer().write(fg(.white)) catch unreachable;
         _ = colorized_path.writer().write(comptime fg(.bright_blue) ++ "/") catch unreachable;
-        //_ = colorized_path.writer().write("/") catch unreachable;
         _ = colorized_path.writer().write(color) catch unreachable;
         _ = colorized_path.writer().write(name.name) catch unreachable;
-
-        //std.debug.print("name {s}{s}\n", .{ color, name.path });
     }
 
     const color = if (is_link) fg(.cyan) else fg(.bright_blue);
-    //@memcpy(path_buf[0..6], color);
-
-    const exit_code = shell.variables.get("mash::exit_code") orelse unreachable;
+    const exit_code = shell.variables.get("mist.exit_code") orelse unreachable;
 
     var code_buf: [4096]u8 = undefined;
 
-    const previous_name = shell.variables.get("mash::exit_code_name");
+    const previous_name = shell.variables.get("mist.exit_code_name");
 
     const str: []const u8 = if (previous_name) |name| blk: {
-        if (shell.child_error.* != 0) {
+        if (false) {
             break :blk std.fmt.bufPrint(
                 &code_buf,
                 fg(.magenta) ++ "{s}",
@@ -142,11 +131,10 @@ pub fn main(_: []const core.Argument) u8 {
         ) catch unreachable;
     };
 
-    const date = time.Date.fromUnix(std.time.timestamp());
+    const date = time.Date.nowLocal();
 
     stdout.print(prompt, .{
         color,
-        //path,
         colorized_path.items,
         date.hours,
         date.minutes,
@@ -154,5 +142,5 @@ pub fn main(_: []const core.Argument) u8 {
         str,
     }) catch {};
 
-    return 0;
+    return .success;
 }

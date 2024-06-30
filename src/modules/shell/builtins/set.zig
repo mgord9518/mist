@@ -7,23 +7,12 @@ pub const exec_mode: core.ExecMode = .function;
 pub const help = core.Help{
     .description = "create an integer variable",
     .usage = "<VARIABLE NAME> [VALUE]",
-    .options = &.{},
-    .exit_codes = &.{
-        .{
-            .code = 2,
-            .name = "usage error",
-        },
-        .{
-            .code = 3,
-            .name = "already defined",
-        },
-    },
 };
 
-pub fn main(arguments: []const core.Argument) u8 {
+pub fn main(arguments: []const core.Argument) core.Error {
     const allocator = std.heap.page_allocator;
 
-    if (arguments.len < 1 or arguments.len > 2) return 2;
+    if (arguments.len < 1 or arguments.len > 2) return .usage_error;
 
     const name = if (arguments[0] == .positional) blk: {
         //        const s = shell.variables.getKey(
@@ -35,7 +24,7 @@ pub fn main(arguments: []const core.Argument) u8 {
 
         break :blk arguments[0].positional;
     } else {
-        return 2;
+        return .usage_error;
     };
 
     // If an existing variable under the same name exists, ensure it's the
@@ -54,7 +43,7 @@ pub fn main(arguments: []const core.Argument) u8 {
             //            break :blk s;
             break :blk arguments[1].positional;
         } else {
-            return 2;
+            return .usage_error;
         }
     } else "";
 
@@ -63,5 +52,5 @@ pub fn main(arguments: []const core.Argument) u8 {
         value,
     ) catch unreachable;
 
-    return 0;
+    return .success;
 }

@@ -16,7 +16,6 @@ pub const help = core.Help{
         .{ .flag = 'g', .description = "print GID" },
         .{ .flag = 'G', .description = "print all GIDs" },
     },
-    .exit_codes = &.{},
 };
 
 const IdType = enum {
@@ -26,7 +25,7 @@ const IdType = enum {
     gids,
 };
 
-pub fn main(arguments: []const core.Argument) u8 {
+pub fn main(arguments: []const core.Argument) core.Error {
     const stdout = std.io.getStdOut().writer();
 
     var id_type: IdType = .none;
@@ -50,11 +49,11 @@ pub fn main(arguments: []const core.Argument) u8 {
             'G' => id_type = .gids,
             'n' => print_names = true,
 
-            else => return 2,
+            else => return .usage_error,
         }
     }
 
-    if (id_type == .none) return 0;
+    if (id_type == .none) return .success;
 
     const idt = id_type;
 
@@ -64,12 +63,12 @@ pub fn main(arguments: []const core.Argument) u8 {
         uid = std.os.linux.geteuid();
         gid = std.os.linux.getegid();
     } else {
-        var it = PasswdIterator.init(allocator) catch return 1;
+        var it = PasswdIterator.init(allocator) catch return .unknown_error;
         defer it.deinit();
 
         var found = false;
 
-        while (it.next() catch return 1) |entry| {
+        while (it.next() catch return .unknown_error) |entry| {
             if (std.mem.eql(u8, entry.username, username.?)) {
                 uid = entry.uid;
                 found = true;
@@ -92,7 +91,7 @@ pub fn main(arguments: []const core.Argument) u8 {
 
         stdout.print("{d}", .{
             gid,
-        }) catch return 1;
+        }) catch unreachable;
 
         for (gids[0..gid_count], 0..) |current_gid, idx| {
             if (gid_count != idx) {
@@ -106,14 +105,14 @@ pub fn main(arguments: []const core.Argument) u8 {
 
         stdout.print("\n", .{}) catch {};
 
-        return 0;
+        return .success;
     }
 
     if (print_names) {
-        var it = PasswdIterator.init(allocator) catch return 1;
+        var it = PasswdIterator.init(allocator) catch return .unknown_error;
         defer it.deinit();
 
-        while (it.next() catch return 1) |entry| {
+        while (it.next() catch return .unknown_error) |entry| {
             const id = uid;
 
             if (entry.uid != id) continue;
@@ -124,21 +123,21 @@ pub fn main(arguments: []const core.Argument) u8 {
                 // TODO
                 .gid => entry.username,
                 else => unreachable,
-            }}) catch return 1;
+            }}) catch unreachable;
 
             break;
         }
 
-        return 0;
+        return .success;
     }
 
     stdout.print("{d}\n", .{switch (idt) {
         .uid => uid,
         .gid => gid,
         else => unreachable,
-    }}) catch return 1;
+    }}) catch unreachable;
 
-    return 0;
+    return .success;
 }
 
 const PasswdIterator = struct {

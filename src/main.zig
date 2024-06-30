@@ -3,7 +3,7 @@ const posix = std.posix;
 const SIG = posix.SIG;
 pub const modules = @import("modules.zig");
 
-// How a module should be executed when called inside the shell
+/// How a module should be executed when called inside the shell
 pub const ExecMode = enum {
     // Fork the process, then call the main function
     // This must be used for any modules that may hang or exit
@@ -19,7 +19,7 @@ pub const ExecMode = enum {
 
 /// Shared exit codes
 /// Any error that can reasonably be assumed to be generic should be here
-pub const Error = enum(u8) {
+pub const Error = enum(u7) {
     success = 0,
     unknown_error = 1,
     usage_error = 2,
@@ -27,6 +27,7 @@ pub const Error = enum(u8) {
     // Filesystem
     file_not_found = 16,
     access_denied = 17,
+    cwd_not_found = 18,
 
     // Variables
     invalid_variable = 64,
@@ -38,13 +39,13 @@ pub const Error = enum(u8) {
     // Exec
     command_cannot_execute = 126,
     command_not_found = 127,
-    _,
 };
 
 pub const Module = struct {
-    help: Help,
+    help: ?Help,
     main: *const fn ([]const Argument) Error,
     exec_mode: ExecMode,
+    no_display: bool,
 };
 
 pub const module_list = blk: {
@@ -55,47 +56,31 @@ pub const module_list = blk: {
 
     for (mod_decls, 0..) |decl, idx| {
         const mod = @field(modules, decl.name);
-        const type_info = @typeInfo(@TypeOf(mod.main));
-        if (type_info != .Fn) {
-            @compileError("Return type of `main` must be `fn ([]const core.Argument) u8`");
-        }
-
-        if (@bitSizeOf(type_info.Fn.return_type.?) != 8) {
-            @compileError("Return type of `main` must be `fn ([]const core.Argument) u8`");
-        }
 
         list[idx] = .{
             decl.name,
             .{
-                .help = mod.help,
-                .main = @ptrCast(&mod.main),
+                .help = if (@hasDecl(mod, "help")) mod.help else null,
+                .main = &mod.main,
                 .exec_mode = mod.exec_mode,
+                .no_display = @hasDecl(mod, "no_display") and mod.no_display,
             },
         };
     }
 
-    //break :blk list;
     break :blk std.StaticStringMap(Module).initComptime(list);
 };
 
 pub const Help = struct {
     description: []const u8,
     usage: []const u8,
-    options: []const Help.Option,
-
-    /// Custom:q
-    exit_codes: []const Help.ExitCode,
+    options: ?[]const Help.Option = null,
 
     // These are simply for printing the help menu
     // all options must be parsed by the module itself
     pub const Option = struct {
         flag: u8,
         description: []const u8,
-    };
-
-    pub const ExitCode = struct {
-        code: u8,
-        name: []const u8,
     };
 };
 
@@ -126,33 +111,29 @@ pub fn main() !void {
 
     var print_help = false;
 
+    var arguments = std.ArrayList(Argument).init(allocator);
+
     var it = ArgumentParser.init(args.items);
     while (it.next()) |entry| {
         if (entry == .option and entry.option.flag == 'h') {
             print_help = true;
         }
 
-        //        switch (entry) {
-        //            .positional => |string| std.debug.print(fg(.default) ++ "pos: {s}\n", .{string}),
-        //            .option => |arg| std.debug.print(fg(.cyan) ++ "opt: {c}\n", .{arg.flag}),
-        //        }
+        try arguments.append(entry);
     }
 
-    const arguments = std.ArrayList(Argument).init(allocator);
-
     const basename = std.fs.path.basename(argv0);
-    inline for (@typeInfo(modules).Struct.decls) |decl| {
-        if (std.mem.eql(u8, decl.name, basename)) {
-            const mod = @field(modules, decl.name);
 
-            if (print_help) {
-                try printHelp(basename, mod.help);
-                //return;
-                unreachable;
-            }
-
-            _ = mod.main(arguments.items);
+    if (module_list.get(basename)) |mod| {
+        if (print_help) {
+            try printHelp(basename, mod.help);
+            //return;
+            unreachable;
         }
+
+        _ = mod.main(arguments.items[1..]);
+    } else {
+        @panic("Module not found!");
     }
 }
 
@@ -221,18 +202,19 @@ pub const ArgumentParser = struct {
     }
 };
 
-pub fn printHelp(name: []const u8, help: Help) !void {
-    //const argv = std.os.argv;
-    //const argv0 = std.mem.sliceTo(argv[0], 0);
+pub fn printHelp(name: []const u8, h: ?Help) !void {
+    const help = h orelse return;
 
-    std.debug.print(
+    const stdout_file = std.io.getStdOut();
+    const stdout = stdout_file.writer();
+
+    try stdout.print(
         \\{3s}usage{2s}: {4s} {0s}
         \\
         \\{1s}
         \\
         \\
     , .{
-        //argv0,
         help.usage,
         help.description,
         fg(.default),
@@ -240,50 +222,25 @@ pub fn printHelp(name: []const u8, help: Help) !void {
         name,
     });
 
-    if (help.options.len > 0) {
-        std.debug.print(
+    if (help.options) |options| {
+        try stdout.print(
             \\{1s}options{0s}:
             \\
         , .{
             fg(.default),
             fg(.yellow),
         });
-    }
 
-    for (help.options) |option| {
-        std.debug.print("{0s}  {1s}-{2c}{0s}: {3s}\n", .{
-            fg(.default),
-            fg(.cyan),
-            option.flag,
-            option.description,
-        });
-    }
+        for (options) |option| {
+            try stdout.print("{0s}  {1s}-{2c}{0s}: {3s}\n", .{
+                fg(.default),
+                fg(.cyan),
+                option.flag,
+                option.description,
+            });
+        }
 
-    if (help.options.len > 0) {
-        std.debug.print("\n", .{});
-    }
-
-    if (help.exit_codes.len > 0) {
-        std.debug.print(
-            \\{1s}exit codes{0s}:
-            \\
-        , .{
-            fg(.default),
-            fg(.yellow),
-        });
-    }
-
-    for (help.exit_codes) |code| {
-        std.debug.print("{0s}  {1s}{2d}{0s}: {3s}\n", .{
-            fg(.default),
-            fg(.cyan),
-            code.code,
-            code.name,
-        });
-    }
-
-    if (help.exit_codes.len > 0) {
-        std.debug.print("\n", .{});
+        _ = try stdout.write("\n");
     }
 }
 
@@ -310,9 +267,7 @@ const ColorName = enum(comptime_int) {
     bright_white = 97,
 };
 
-// TODO: make this less jank
 pub fn fg(comptime color: ColorName) [:0]const u8 {
-    //pub fn fg(comptime color: ColorName) *const [std.fmt.comptimePrint("\x1b[;{d}m", .{@intFromEnum(color)}).len:0]u8 {
     return std.fmt.comptimePrint(
         "\x1b[;{d}m",
         .{@intFromEnum(color)},
@@ -326,7 +281,6 @@ pub fn printError(comptime fmt: []const u8, args: anytype) void {
 }
 
 pub const Signal = enum(u6) {
-    none = 0,
     hang_up = SIG.HUP,
     interrupt = SIG.INT,
     quit = SIG.QUIT,
@@ -339,44 +293,28 @@ pub const Signal = enum(u6) {
     segmentation_fault = SIG.SEGV,
 };
 
-pub fn disableSig(signal: Signal) !void {
-    var action = std.posix.Sigaction{
-        .handler = .{ .handler = SIG.IGN },
-        .mask = std.posix.empty_sigset,
+fn sigImpl(signal: Signal, enable: bool) !void {
+    const handler = if (enable) SIG.DFL else SIG.IGN;
+
+    var action = posix.Sigaction{
+        .handler = .{
+            .handler = handler,
+        },
+        .mask = posix.empty_sigset,
         .flags = 0,
     };
 
-    try std.posix.sigaction(
+    try posix.sigaction(
         @intFromEnum(signal),
         &action,
         null,
     );
+}
+
+pub fn disableSig(signal: Signal) !void {
+    try sigImpl(signal, false);
 }
 
 pub fn enableSig(signal: Signal) !void {
-    var action = std.posix.Sigaction{
-        .handler = .{ .handler = SIG.DFL },
-        .mask = std.posix.empty_sigset,
-        .flags = 0,
-    };
-
-    try std.posix.sigaction(
-        @intFromEnum(signal),
-        &action,
-        null,
-    );
-}
-
-pub fn runModule(name: []const u8, arguments: ?[]const Argument) !u8 {
-    // Run module if it exists
-    inline for (@typeInfo(modules).Struct.decls) |decl| {
-        if (std.mem.eql(u8, decl.name, name)) {
-            const mod = @field(modules, decl.name);
-
-            return mod.main(arguments orelse &.{});
-        }
-    }
-
-    // Module not found
-    return error.ModuleNotFound;
+    try sigImpl(signal, true);
 }

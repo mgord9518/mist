@@ -6,20 +6,32 @@ pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
     .description = "repeat [" ++ fg(.cyan) ++ "STRING" ++
-        fg(.default) ++ "], or `yes` if unspecified",
-    .usage = "{0s}",
-    .options = &.{},
-    .exit_codes = &.{},
+        fg(.default) ++ "], or `y` if unspecified",
+
+    .usage = "[" ++ fg(.cyan) ++ "STRING" ++
+        fg(.default) ++ "]",
 };
 
-pub fn main(arguments: []const core.Argument) u8 {
-    _ = arguments;
-    //const allocator = std.heap.page_allocator;
+pub fn main(arguments: []const core.Argument) core.Error {
     const stdout = std.io.getStdOut().writer();
 
-    while (true) {
-        _ = stdout.write("y\n") catch break;
+    var target: ?[]const u8 = null;
+    for (arguments) |arg| {
+        if (arg == .option) return .usage_error;
+
+        if (arg == .positional) {
+            if (target != null) return .usage_error;
+
+            target = arg.positional;
+        }
     }
 
-    return 0;
+    while (true) {
+        stdout.print(
+            "{s}\n",
+            .{target orelse "y"},
+        ) catch break;
+    }
+
+    return .success;
 }

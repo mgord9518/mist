@@ -186,7 +186,12 @@ pub const SyntaxIterator = struct {
                     }
                 },
                 '$' => {
-                    var_state = .normal;
+                    if (backslash_escape) {
+                        should_add = true;
+                        backslash_escape = false;
+                    } else {
+                        var_state = .normal;
+                    }
                 },
                 '{' => {
                     switch (var_state) {

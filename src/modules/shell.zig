@@ -3,11 +3,12 @@ const posix = std.posix;
 const core = @import("../main.zig");
 
 pub const modules = core.modules;
+pub const VariableMap = @import("shell/VariableMap.zig");
+
 const pipe = @import("shell/pipe.zig");
 const parser = @import("shell/parser.zig");
 const cursor = @import("shell/curses.zig");
 const History = @import("shell/History.zig");
-const Int = std.math.big.int.Managed;
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .fork;
@@ -15,82 +16,13 @@ pub const exec_mode: core.ExecMode = .fork;
 pub var logical_path: []const u8 = undefined;
 pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
-// Shared memory so that a child thread can communicate errors
-pub var child_error: *std.meta.Int(.unsigned, @bitSizeOf(anyerror)) = undefined;
-
 pub const help = core.Help{
     .description = "minimal interactive shell. use `commands` for a list of built-in commands",
-    //.usage = "",
-    .usage = "{0s}",
-    .options = &.{
-        .{
-            .flag = 'a',
-            .description = "bruh",
-        },
-    },
-
-    .exit_codes = &.{},
-};
-
-const Error = enum(u8) {
-    success = 0,
-    unknown_error = 1,
-    usage_error = 2,
-    not_found = 3,
-};
-
-// Simple wrapper around `StringHashMap` to automatically manage string memory
-pub const VariableMap = struct {
-    map: std.StringHashMap([]const u8),
-
-    pub fn init(allocator: std.mem.Allocator) VariableMap {
-        return .{ .map = std.StringHashMap([]const u8).init(allocator) };
-    }
-
-    pub fn deinit(self: *VariableMap) void {
-        var it = self.map.keyIterator();
-
-        while (it.next()) |key| {
-            _ = self.remove(key.*);
-        }
-
-        self.map.deinit();
-    }
-
-    pub fn get(self: *VariableMap, name: []const u8) ?[]const u8 {
-        return self.map.get(name);
-    }
-
-    pub fn put(self: *VariableMap, name: []const u8, value: []const u8) !void {
-        const key = if (self.map.get(name)) |s| blk: {
-            self.map.allocator.free(s);
-
-            break :blk name;
-        } else try self.map.allocator.dupe(u8, name);
-
-        // TODO TYPE
-        return try self.map.put(
-            key,
-            try self.map.allocator.dupe(u8, value),
-        );
-    }
-
-    pub fn remove(self: *VariableMap, name: []const u8) bool {
-        const key = self.map.getKey(name) orelse return false;
-        const value = self.map.get(key) orelse unreachable;
-
-        const ret = self.map.remove(key);
-        self.map.allocator.free(key);
-        self.map.allocator.free(value);
-
-        return ret;
-    }
+    .usage = "",
 };
 
 pub var variables: VariableMap = undefined;
-
 pub var aliases: std.StringHashMap(Command) = undefined;
-
 pub var history: History = undefined;
 
 pub const Command = union(enum) {
@@ -130,7 +62,7 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
         var code_buf: [3]u8 = undefined;
 
         variables.put(
-            "mash::exit_code",
+            "mist.exit_code",
             std.fmt.bufPrint(
                 &code_buf,
                 "{d}",
@@ -139,9 +71,9 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
         ) catch {};
 
         if (previous_status_name) |name| {
-            variables.put("mash::exit_code_name", name) catch {};
+            variables.put("mist.exit_code_name", name) catch {};
         } else {
-            _ = variables.remove("mash::exit_code_name");
+            _ = variables.remove("mist.exit_code_name");
         }
 
         var pipe_line = std.ArrayList(
@@ -149,11 +81,11 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
         ).init(allocator);
         defer pipe_line.deinit();
 
-        var it = parser.SyntaxIterator.init(
+        var it = try parser.SyntaxIterator.init(
             //allocator,
             arena_allocator,
             line,
-        ) catch return 1;
+        );
 
         var print_help: ?core.Help = null;
         var print_help_name: []const u8 = &.{};
@@ -167,120 +99,108 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
             ) orelse entry.command;
 
             var added = false;
+
             // Convert to module command if it exists
-            inline for (@typeInfo(modules).Struct.decls) |decl| {
-                if (std.mem.eql(u8, decl.name, command.system.name)) {
-                    // TODO free
-                    var mod_args = std.ArrayList(core.Argument).init(allocator);
+            if (core.module_list.get(command.system.name)) |mod| {
+                // TODO free
+                var mod_args = std.ArrayList(core.Argument).init(allocator);
 
-                    if (command.system.arguments != null) {
-                        for (command.system.arguments.?) |arg_str| {
-                            var mod_it = core.ArgumentParser.init(&.{arg_str});
+                if (command.system.arguments != null) {
+                    for (command.system.arguments.?) |arg_str| {
+                        var mod_it = core.ArgumentParser.init(&.{arg_str});
 
-                            while (mod_it.next()) |arg| {
-                                try mod_args.append(arg);
+                        while (mod_it.next()) |arg| {
+                            try mod_args.append(arg);
 
-                                if (arg == .option and arg.option.flag == 'h') {
-                                    const mod = @field(modules, decl.name);
-
-                                    print_help = mod.help;
-                                    print_help_name = command.system.name;
-                                }
+                            if (arg == .option and arg.option.flag == 'h') {
+                                print_help = mod.help;
+                                print_help_name = command.system.name;
                             }
                         }
                     }
-
-                    try pipe_line.append(.{
-                        .module = .{
-                            .name = command.system.name,
-                            .arguments = mod_args.items,
-                        },
-                    });
-
-                    added = true;
                 }
+
+                try pipe_line.append(.{
+                    .module = .{
+                        .name = command.system.name,
+                        .arguments = mod_args.items,
+                    },
+                });
+
+                added = true;
             }
 
             if (added) continue;
-
             try pipe_line.append(command);
         }
-
-        //std.debug.print("{}\n", .{pipe_line});
 
         if (pipe_line.items.len == 0) continue;
 
         const exit_status = pipe.chainCommands(
             allocator,
             pipe_line.items,
+        ) catch unreachable;
+
+        previous_status_name = statusName(
+            exit_status.ret,
         );
 
-        if (exit_status.status.exit_code != 0 or exit_status.status.signal != .none) {
-            const command_name = if (pipe_line.items[exit_status.idx] == .module) blk: {
-                break :blk pipe_line.items[exit_status.idx].module.name;
-            } else blk: {
-                break :blk pipe_line.items[exit_status.idx].system.name;
-            };
+        previous_status = statusCode(
+            exit_status.ret,
+        );
 
-            previous_status = exit_status.status.exit_code;
-            previous_status_name = exitCodeName(
-                command_name,
-                pipe_line.items[exit_status.idx] == .module,
-                exit_status.status,
-            );
+        if (previous_status_name) |err_name| {
+            core.printError("{s}\n", .{err_name});
         }
-        //std.debug.print("{}\n", .{exit_status});
     }
 }
 
-pub fn main(arguments: []const core.Argument) u8 {
-    _ = arguments;
+pub fn main(arguments: []const core.Argument) core.Error {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
+    var target: ?[]const u8 = null;
+    for (arguments) |arg| {
+        if (arg == .option) switch (arg.option.flag) {
+            //'a' => show_hidden = true,
+
+            else => return .usage_error,
+        };
+
+        if (arg == .positional) {
+            target = arg.positional;
+            std.debug.print("TARGET {?s}\n", .{target});
+        }
+    }
+
     _ = stdout.write("\n Welcome to " ++
         comptime fg(.cyan) ++ "MIST" ++
-        fg(.default) ++ "!\n\n" ++
-        " This is a minimal shell inspired by UNIX, but it is not\n" ++
-        " POSIX-compliant\n\n" ++
+        fg(.default) ++ ", a Minimal Interactive Shell inspired by UNIX\n\n" ++
+        "   [X] Command piping\n" ++
+        "   [X] Simple quoting\n" ++
+        "   [X] Escape characters\n" ++
+        "   [-] Plugin system\n" ++
+        "   [ ] Globbing\n\n" ++
         " For a list of builtin modules, type: " ++
         fg(.cyan) ++ "commands" ++
         fg(.default) ++ "\n\n") catch unreachable;
 
     logical_path = std.posix.getcwd(
         &logical_path_buf,
-    ) catch return 1;
-
-    const shm = posix.mmap(
-        null,
-        @sizeOf(@TypeOf(child_error)),
-        //posix.PROT.READ | posix.PROT.WRITE,
-        posix.PROT.WRITE,
-        .{
-            .TYPE = .SHARED,
-            .ANONYMOUS = true,
-        },
-        -1,
-        0,
-    ) catch unreachable;
-    defer posix.munmap(shm);
-
-    child_error = @ptrCast(shm.ptr);
-    child_error.* = 0;
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    ) catch return .cwd_not_found;
 
     variables = VariableMap.init(allocator);
     defer variables.deinit();
 
-    variables.put("mash::exit_code", "0") catch {};
-    // $tush::exit_code
-    // $tush.exit_code
-    // $env.
+    variables.put("mist.exit_code", "0") catch {};
 
-    //nonInteractiveLoop("bruh") catch unreachable;
+    if (target) |script_path| {
+        nonInteractiveLoop(script_path) catch unreachable;
+        return .success;
+    }
 
     aliases = std.StringHashMap(Command).init(allocator);
     defer aliases.deinit();
@@ -289,14 +209,12 @@ pub fn main(arguments: []const core.Argument) u8 {
         .{ .system = .{ .name = "echo" } },
     ) catch {};
 
-    //    core.disableSigint() catch unreachable;
     core.disableSig(.interrupt) catch unreachable;
     core.disableSig(.quit) catch unreachable;
 
     var print_prompt = true;
 
     // TODO: history limit
-    //var history = std.ArrayList([]const u8).init(allocator);
     history = History.init(allocator);
     defer history.deinit();
 
@@ -305,14 +223,7 @@ pub fn main(arguments: []const core.Argument) u8 {
 
     // Main loop
     while (true) {
-        setTerminalToRawMode() catch return 1;
-
-        if (child_error.* != 0) {
-            std.debug.print("errsize {d} {!}\n", .{
-                @sizeOf(?anyerror),
-                @errorFromInt(child_error.*),
-            });
-        }
+        setTerminalToRawMode() catch return .unknown_error;
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         const arena_allocator = arena.allocator();
@@ -321,7 +232,7 @@ pub fn main(arguments: []const core.Argument) u8 {
         var buf: [3]u8 = undefined;
 
         variables.put(
-            "mash::exit_code",
+            "mist.exit_code",
             std.fmt.bufPrint(
                 &buf,
                 "{d}",
@@ -330,9 +241,9 @@ pub fn main(arguments: []const core.Argument) u8 {
         ) catch {};
 
         if (previous_status_name) |name| {
-            variables.put("mash::exit_code_name", name) catch {};
+            variables.put("mist.exit_code_name", name) catch {};
         } else {
-            _ = variables.remove("mash::exit_code_name");
+            _ = variables.remove("mist.exit_code_name");
         }
 
         // How many entries to travel up the history
@@ -365,7 +276,7 @@ pub fn main(arguments: []const core.Argument) u8 {
             var char = getChar();
 
             if (char == '\n') {
-                stdout.print("\n", .{}) catch return 1;
+                stdout.print("\n", .{}) catch return .unknown_error;
                 print_prompt = true;
                 cursor_pos = 0;
                 vcursor_pos = 0;
@@ -378,8 +289,8 @@ pub fn main(arguments: []const core.Argument) u8 {
                 )) break;
 
                 history.append(
-                    history.allocator.dupe(u8, line.items) catch return 1,
-                ) catch return 1;
+                    history.allocator.dupe(u8, line.items) catch return .unknown_error,
+                ) catch return .unknown_error;
 
                 break;
             }
@@ -431,12 +342,12 @@ pub fn main(arguments: []const core.Argument) u8 {
                         history_cursor += 1;
 
                         line.shrinkAndFree(0);
-                        line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return 1;
+                        line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
 
                         cursor.move(.left, vcursor_pos);
-                        stdout.print("\x1b[0K", .{}) catch return 1;
+                        stdout.print("\x1b[0K", .{}) catch return .unknown_error;
 
-                        stdout.print("{s}", .{line.items}) catch return 1;
+                        stdout.print("{s}", .{line.items}) catch return .unknown_error;
 
                         cursor_pos = line.items.len;
                         vcursor_pos = line.items.len;
@@ -450,14 +361,13 @@ pub fn main(arguments: []const core.Argument) u8 {
                         line.shrinkAndFree(0);
 
                         if (history_cursor > 0) {
-                            line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return 1;
+                            line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
                         }
 
                         cursor.move(.left, cursor_pos);
-                        //stdout.print("\x1b[0K", .{}) catch return 1;
                         cursor.clearLine(.right);
 
-                        stdout.print("{s}", .{line.items}) catch return 1;
+                        stdout.print("{s}", .{line.items}) catch return .unknown_error;
                         cursor_pos = line.items.len;
                         vcursor_pos = line.items.len;
                         continue;
@@ -476,7 +386,6 @@ pub fn main(arguments: []const core.Argument) u8 {
                     'D' => {
                         if (cursor_pos > 0) {
                             cursor.move(.left, 1);
-                            //stdout.print("\x1b[D", .{}) catch return 1;
                             cursor_pos -= 1;
                             vcursor_pos -= 1;
                         }
@@ -488,12 +397,7 @@ pub fn main(arguments: []const core.Argument) u8 {
 
                         continue;
                     },
-                    else => {
-                        //                        stdout.print(
-                        //                            "\x1b[{c}",
-                        //                            .{char},
-                        //                        ) catch return 1;
-                    },
+                    else => {},
                 }
             }
 
@@ -510,12 +414,12 @@ pub fn main(arguments: []const core.Argument) u8 {
                 var idx: usize = 0;
 
                 while (idx <= continue_len) : (idx += 1) {
-                    _ = line.insert(cursor_pos + idx, utf8_buf[idx]) catch return 1;
+                    _ = line.insert(cursor_pos + idx, utf8_buf[idx]) catch return .unknown_error;
                 }
                 //_ = line_text.insert(cursor_pos, codepoint) catch return 1;
                 cursor.savePosition();
                 // Print updated line
-                stdout.print("{s}", .{line.items[cursor_pos..]}) catch return 1;
+                stdout.print("{s}", .{line.items[cursor_pos..]}) catch return .unknown_error;
 
                 cursor_pos += continue_len + 1;
                 vcursor_pos += 1;
@@ -533,14 +437,14 @@ pub fn main(arguments: []const core.Argument) u8 {
             //allocator,
             arena_allocator,
             line.items,
-        ) catch return 1;
-        //defer it.deinit();
+        ) catch return .unknown_error;
+        defer it.deinit();
 
         var print_help: ?core.Help = null;
         var print_help_name: []const u8 = &.{};
 
         // Parse the line text
-        while (it.next() catch return 1) |entry| {
+        while (it.next() catch return .unknown_error) |entry| {
             if (entry != .command) continue;
 
             const command = aliases.get(
@@ -549,124 +453,117 @@ pub fn main(arguments: []const core.Argument) u8 {
 
             var added = false;
             // Convert to module command if it exists
-            inline for (@typeInfo(modules).Struct.decls) |decl| {
-                if (std.mem.eql(u8, decl.name, command.system.name)) {
-                    // TODO free
-                    var mod_args = std.ArrayList(core.Argument).init(allocator);
+            if (core.module_list.get(command.system.name)) |mod| {
+                // TODO free
+                var mod_args = std.ArrayList(core.Argument).init(allocator);
 
-                    if (command.system.arguments != null) {
-                        for (command.system.arguments.?) |arg_str| {
-                            var mod_it = core.ArgumentParser.init(&.{arg_str});
+                if (command.system.arguments != null) {
+                    for (command.system.arguments.?) |arg_str| {
+                        var mod_it = core.ArgumentParser.init(&.{arg_str});
 
-                            while (mod_it.next()) |arg| {
-                                mod_args.append(arg) catch return 1;
+                        while (mod_it.next()) |arg| {
+                            mod_args.append(arg) catch unreachable;
 
-                                if (arg == .option and arg.option.flag == 'h') {
-                                    const mod = @field(modules, decl.name);
-
-                                    print_help = mod.help;
-                                    print_help_name = command.system.name;
-                                }
+                            if (arg == .option and arg.option.flag == 'h') {
+                                print_help = mod.help;
+                                print_help_name = command.system.name;
                             }
                         }
                     }
-
-                    pipe_line.append(.{
-                        .module = .{
-                            .name = command.system.name,
-                            .arguments = mod_args.items,
-                        },
-                    }) catch return 1;
-
-                    added = true;
                 }
+
+                pipe_line.append(.{
+                    .module = .{
+                        .name = command.system.name,
+                        .arguments = mod_args.items,
+                    },
+                }) catch unreachable;
+
+                added = true;
             }
 
             if (added) continue;
 
-            pipe_line.append(command) catch return 1;
+            pipe_line.append(command) catch return .unknown_error;
         }
 
         if (print_help) |h| {
-            core.printHelp(print_help_name, h) catch return 1;
+            core.printHelp(print_help_name, h) catch return .unknown_error;
             previous_status = 0;
             continue;
         }
 
         if (pipe_line.items.len == 0) continue;
 
-        child_error.* = 0;
-
-        setTerminalToNormalMode() catch return 1;
-
-        const exit_status = pipe.chainCommands(
-            allocator,
-            pipe_line.items,
-        );
+        setTerminalToNormalMode() catch return .unknown_error;
 
         previous_status = 0;
         previous_status_name = null;
 
-        if (exit_status.status.exit_code != 0 or exit_status.status.signal != .none) {
-            const command_name = if (pipe_line.items[exit_status.idx] == .module) blk: {
-                break :blk pipe_line.items[exit_status.idx].module.name;
-            } else blk: {
-                break :blk pipe_line.items[exit_status.idx].system.name;
-            };
+        const exit_status = pipe.chainCommands(
+            allocator,
+            pipe_line.items,
+        ) catch unreachable;
 
-            previous_status = exit_status.status.exit_code;
-            previous_status_name = exitCodeName(
-                command_name,
-                pipe_line.items[exit_status.idx] == .module,
-                exit_status.status,
-            );
+        previous_status_name = statusName(
+            exit_status.ret,
+        );
+
+        previous_status = statusCode(
+            exit_status.ret,
+        );
+
+        if (exit_status.ret == .module_exit_failure) {
+            const mod_name = pipe_line.items[exit_status.idx].module.name;
+            const mod = core.module_list.get(mod_name) orelse unreachable;
+
+            if (exit_status.ret.module_exit_failure == .usage_error) {
+                core.printHelp(mod_name, mod.help) catch {};
+            }
         }
+
+        //if (exit_status.ret == .status and pipe_line.items[exit_status.idx] == .module) {
+
+        //}
     }
 }
 
-fn exitCodeName(
-    name: []const u8,
-    is_module: bool,
-    status: pipe.ChainRet.Status,
-) ?[]const u8 {
-    switch (status.signal) {
-        .none => {},
-
-        else => return @tagName(status.signal),
-    }
-
-    if (is_module) {
-        if (std.enums.tagName(
-            core.Error,
-            @enumFromInt(status.exit_code),
-        )) |tag| {
-            return tag;
-        }
-
-        if (core.module_list.get(name)) |mod| {
-            for (mod.help.exit_codes) |code| {
-                if (code.code == status.exit_code) return code.name;
-            }
-        }
-    }
-
-    // Special case for not found and cannot execute
-    // TODO: ensure these codes come from the shell
-    if (child_error.* != 0) switch (status.exit_code) {
-        126, 127 => |c| return @tagName(@as(core.Error, @enumFromInt(c))),
-
-        else => {},
+fn statusCode(
+    exec_status: pipe.ChainRet.Return,
+) u8 {
+    return switch (exec_status) {
+        .success => 0,
+        .signal => |signal| @as(u8, @intFromEnum(signal)) + 127,
+        // TODO
+        .exec_failure => 127,
+        .status => |status| status.exit_code,
+        .module_exit_failure => |err| @intFromEnum(err),
     };
+}
 
-    return null;
+fn statusName(
+    exec_status: pipe.ChainRet.Return,
+) ?[]const u8 {
+    return switch (exec_status) {
+        .success => null,
+        .signal => |signal| @tagName(signal),
+        .exec_failure => "command_not_found",
+        .module_exit_failure => |err| {
+            if (err == .success) return null;
+
+            return @tagName(err);
+        },
+        .status => null,
+    };
 }
 
 fn utf8ContinueLen(byte: u8) u2 {
     return switch (byte >> 4) {
-        else => 0,
         0b1100 => 1,
         0b1110 => 2,
         0b1111 => 3,
+
+        else => 0,
     };
 }
 

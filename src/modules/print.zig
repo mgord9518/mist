@@ -8,35 +8,18 @@ pub const help = core.Help{
     .description = "print [" ++ fg(.cyan) ++ "STRING" ++
         fg(.default) ++ "] to stdout",
     .usage = "{0s}",
-    .options = &.{},
-    .exit_codes = &.{},
 };
 
-const Error = enum(u8) {
-    success = 0,
-    unknown_error = 1,
-    usage_error = 2,
-    not_found = 3,
-};
-
-pub fn main(arguments: []const core.Argument) Error {
+pub fn main(arguments: []const core.Argument) core.Error {
     const stdout = std.io.getStdOut().writer();
 
-    for (arguments) |arg| {
-        if (arg == .option) switch (arg.option.flag) {
-            //'l' => show_hidden = true,
+    if (arguments.len != 1) return .usage_error;
+    if (arguments[0] == .option) return .usage_error;
 
-            else => return .usage_error,
-        };
-
-        if (arg == .positional) {
-            stdout.print("{s}\n", .{arg.positional}) catch return .unknown_error;
-        }
-
-        break;
-    }
-
-    //const allocator = std.heap.page_allocator;
+    stdout.print(
+        "{s}\n",
+        .{arguments[0].positional},
+    ) catch return .unknown_error;
 
     return .success;
 }

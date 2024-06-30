@@ -1,23 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-pub fn main() void {
-    const time = Timestamp{
-        //.seconds = 1719283209,
-        .seconds = -45812848561,
-        .nanoseconds = 10069,
-    };
-    //   std.debug.print("UNIX: {d}\n", .{time.seconds});
-    //    std.debug.print("YEAR: {d}\n", .{time.year()});
-    //    std.debug.print("MONTH: {} {d}\n", .{
-    //        time.month(),
-    //        time.month().numeric(),
-    //    });
-
-    std.debug.print("DATE: {}\n", .{Date.fromTimestamp(time)});
-
-    //time.dump();
-}
-
+/// Calendar (Gregorian) date
 pub const Date = struct {
     nanoseconds: u32,
     seconds: u6,
@@ -66,6 +50,14 @@ pub const Date = struct {
             return @intFromEnum(m);
         }
     };
+
+    pub fn nowUtc() Date {
+        return Date.fromTimestamp(Timestamp.nowUtc());
+    }
+
+    pub fn nowLocal() Date {
+        return Date.fromTimestamp(Timestamp.nowLocal());
+    }
 
     pub fn fromUnix(seconds: i64) Date {
         return fromTimestamp(.{ .seconds = seconds });
@@ -183,7 +175,7 @@ pub const Date = struct {
                 new /= 10;
             }
 
-            try out_stream.print(".{d:<}", .{
+            try out_stream.print(".{d}", .{
                 new,
             });
         }
@@ -193,174 +185,73 @@ pub const Date = struct {
 /// This type is inspired by C stdlib's `timespec`
 pub const Timestamp = struct {
     seconds: i64,
+
+    // Must be between 0 and 1,000,000,000
     nanoseconds: u32 = 0,
 
-    //    pub fn year(time: *const Timestamp) isize {
-    //        const secs = time.seconds - leapoch;
-    //        var days = @divTrunc(secs, s_per_d);
-    //        var remsecs = @rem(secs, s_per_d);
-    //        if (remsecs < 0) {
-    //            remsecs += s_per_d;
-    //            days -= 1;
-    //        }
-    //
-    //        var qc_cycles = @divTrunc(days, d_per_400y);
-    //        var remdays = @rem(days, d_per_400y);
-    //        if (remdays < 0) {
-    //            remdays += d_per_400y;
-    //            qc_cycles -= 1;
-    //        }
-    //
-    //        var c_cycles = @divFloor(remdays, d_per_100y);
-    //        if (c_cycles == 4) {
-    //            c_cycles -= 1;
-    //        }
-    //        remdays -= c_cycles * d_per_100y;
-    //
-    //        var q_cycles = @divTrunc(remdays, d_per_4y);
-    //        if (q_cycles == 25) {
-    //            q_cycles -= 1;
-    //        }
-    //        remdays -= q_cycles * d_per_4y;
-    //
-    //        var remyears = @divTrunc(remdays, 365);
-    //        if (remyears == 4) {
-    //            remyears -= 1;
-    //        }
-    //        remdays -= remyears * 365;
-    //
-    //        const leap: i64 = if (remyears == 0 and (q_cycles != 0 or c_cycles == 0)) 1 else 0;
-    //        var yday = remdays + 31 + 28 + leap;
-    //        if (yday >= 365 + leap) yday -= 365 + leap;
-    //
-    //        const years = remyears + (4 * q_cycles) + (100 * c_cycles) + (400 * qc_cycles);
-    //
-    //        var m: u4 = 0;
-    //        while (days_in_month[m] <= remdays) : (m += 1) {
-    //            remdays -= days_in_month[m];
-    //        }
-    //
-    //        if (m + 2 >= 12) {
-    //            return years + 2001;
-    //        }
-    //
-    //        return years + 2000;
-    //    }
-    //
-    //    pub fn month(time: *const Timestamp) Date.Month {
-    //        const secs = time.seconds - leapoch;
-    //        var days = @divTrunc(secs, s_per_d);
-    //        var remsecs = @rem(secs, s_per_d);
-    //        if (remsecs < 0) {
-    //            remsecs += s_per_d;
-    //            days -= 1;
-    //        }
-    //
-    //        var remdays = @rem(days, d_per_400y);
-    //        if (remdays < 0) {
-    //            remdays += d_per_400y;
-    //        }
-    //
-    //        var c_cycles = @divFloor(remdays, d_per_100y);
-    //        if (c_cycles == 4) {
-    //            c_cycles -= 1;
-    //        }
-    //        remdays -= c_cycles * d_per_100y;
-    //
-    //        var q_cycles = @divTrunc(remdays, d_per_4y);
-    //        if (q_cycles == 25) {
-    //            q_cycles -= 1;
-    //        }
-    //        remdays -= q_cycles * d_per_4y;
-    //
-    //        var remyears = @divTrunc(remdays, 365);
-    //        if (remyears == 4) {
-    //            remyears -= 1;
-    //        }
-    //        remdays -= remyears * 365;
-    //
-    //        const leap: i64 = if (remyears == 0 and (q_cycles != 0 or c_cycles == 0)) 1 else 0;
-    //        var yday = remdays + 31 + 28 + leap;
-    //        if (yday >= 365 + leap) yday -= 365 + leap;
-    //
-    //        var m: u4 = 0;
-    //        while (days_in_month[m] <= remdays) : (m += 1) {
-    //            remdays -= days_in_month[m];
-    //        }
-    //
-    //        var mnth = m + 2;
-    //
-    //        if (m >= 10) {
-    //            mnth -= 12;
-    //        }
-    //
-    //        return @enumFromInt(mnth);
-    //    }
-    //
-    //    fn dumpe(time: *const Timestamp) void {
-    //        const secs = time.seconds - leapoch;
-    //        var days = @divTrunc(secs, s_per_d);
-    //        var remsecs = @rem(secs, s_per_d);
-    //        if (remsecs < 0) {
-    //            remsecs += s_per_d;
-    //            days -= 1;
-    //        }
-    //
-    //        var wday = @rem(3 + days, 7);
-    //        if (wday < 0) {
-    //            wday += 7;
-    //        }
-    //
-    //        var qc_cycles = @divTrunc(days, d_per_400y);
-    //        std.debug.print("qc {d}\n", .{qc_cycles});
-    //        var remdays = @rem(days, d_per_400y);
-    //        if (remdays < 0) {
-    //            remdays += d_per_400y;
-    //            qc_cycles -= 1;
-    //        }
-    //        std.debug.print("qc {d}\n", .{qc_cycles});
-    //
-    //        var c_cycles = @divFloor(remdays, d_per_100y);
-    //        std.debug.print("c {d}\n", .{c_cycles});
-    //        if (c_cycles == 4) {
-    //            c_cycles -= 1;
-    //        }
-    //        remdays -= c_cycles * d_per_100y;
-    //        std.debug.print("c {d}\n", .{c_cycles});
-    //
-    //        var q_cycles = @divTrunc(remdays, d_per_4y);
-    //        std.debug.print("q {d}\n", .{q_cycles});
-    //        if (q_cycles == 25) {
-    //            q_cycles -= 1;
-    //        }
-    //        remdays -= q_cycles * d_per_4y;
-    //        std.debug.print("q {d}\n", .{q_cycles});
-    //
-    //        var remyears = @divTrunc(remdays, 365);
-    //        if (remyears == 4) {
-    //            remyears -= 1;
-    //        }
-    //        remdays -= remyears * 365;
-    //
-    //        const leap: i64 = if (remyears == 0 and (q_cycles != 0 or c_cycles == 0)) 1 else 0;
-    //        var yday = remdays + 31 + 28 + leap;
-    //        if (yday >= 365 + leap) yday -= 365 + leap;
-    //
-    //        const years = remyears + (4 * q_cycles) + (100 * c_cycles) + (400 * qc_cycles);
-    //
-    //        var m: u4 = 0;
-    //        while (days_in_month[m] <= remdays) : (m += 1) {
-    //            remdays -= days_in_month[m];
-    //        }
-    //
-    //        // TODO INT MAX
-    //        //if (years + 100)
-    //
-    //        std.debug.print("year: {d}\n", .{years + 2000});
-    //        std.debug.print("month: {d}\n", .{m + 2});
-    //        if (m + 2 >= 12) {
-    //            std.debug.print("year: {d}\n", .{years + 101});
-    //            std.debug.print("month: {d}\n", .{m - 10});
-    //        }
-    //    }
+    pub fn nowUtc() Timestamp {
+        const unix_nanoseconds = std.time.nanoTimestamp();
+
+        return .{
+            .seconds = @intCast(@divTrunc(
+                unix_nanoseconds,
+                std.time.ns_per_s,
+            )),
+            .nanoseconds = @intCast(@mod(
+                unix_nanoseconds,
+                std.time.ns_per_s,
+            )),
+        };
+    }
+
+    pub fn nowLocal() Timestamp {
+        return switch (builtin.os.tag) {
+            .linux => nowLocalLinuxImpl(),
+
+            else => @compileError("`nowLocal` not yet implemented for OS"),
+        };
+    }
+
+    fn nowLocalLinuxImpl() Timestamp {
+        const Container = struct {
+            // If `localtime` is called, these will be populated for caching
+            var local_tz: ?std.tz.Tz = null;
+            var latest_transition_idx: usize = 0;
+        };
+
+        if (Container.local_tz == null) {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            const allocator = gpa.allocator();
+
+            const cwd = std.fs.cwd();
+
+            var tz_file = cwd.openFile(
+                "/etc/localtime",
+                .{},
+            ) catch return nowUtc();
+            defer tz_file.close();
+
+            Container.local_tz = std.tz.Tz.parse(
+                allocator,
+                tz_file.reader(),
+            ) catch return nowUtc();
+        }
+
+        const utc_time = Timestamp.nowUtc();
+
+        var latest_transition: ?std.tz.Transition = null;
+        for (Container.local_tz.?.transitions[Container.latest_transition_idx..], 0..) |trans, idx| {
+            if (trans.ts >= utc_time.seconds) {
+                Container.latest_transition_idx += idx - 1;
+                break;
+            }
+
+            latest_transition = trans;
+        }
+
+        return .{
+            .seconds = utc_time.seconds + latest_transition.?.timetype.offset,
+            .nanoseconds = utc_time.nanoseconds,
+        };
+    }
 };

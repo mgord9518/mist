@@ -9,23 +9,12 @@ pub const exec_mode: core.ExecMode = .function;
 pub const help = core.Help{
     .description = "change working directory",
     .usage = "[DIRECTORY]",
-    .options = &.{},
-    .exit_codes = &.{
-        .{
-            .code = 2,
-            .name = "usage error",
-        },
-        .{
-            .code = 3,
-            .name = "not found",
-        },
-    },
 };
 
 var previous_dir: ?[]const u8 = null;
 var previous_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
-pub fn main(arguments: []const core.Argument) u8 {
+pub fn main(arguments: []const core.Argument) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -34,16 +23,16 @@ pub fn main(arguments: []const core.Argument) u8 {
     if (arguments.len == 0) {
         const home = std.posix.getenv("HOME") orelse "";
 
-        previous_dir = std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home}) catch return 1;
+        previous_dir = std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home}) catch return .unknown_error;
 
         std.posix.chdir(home) catch |err| {
             return switch (err) {
-                error.FileNotFound => 3,
-                else => return 1,
+                error.FileNotFound => .file_not_found,
+                else => return .unknown_error,
             };
         };
 
-        return 0;
+        return .success;
     }
 
     if (std.mem.eql(u8, arguments[0].positional, "-")) {
@@ -64,7 +53,7 @@ pub fn main(arguments: []const core.Argument) u8 {
             //            };
         }
 
-        return 0;
+        return .unknown_error;
     }
 
     const p = arguments[0].positional;
@@ -79,7 +68,7 @@ pub fn main(arguments: []const core.Argument) u8 {
 
     var dir = cwd.openDir(tmp, .{}) catch {
         allocator.free(tmp);
-        return 2;
+        return .unknown_error;
     };
 
     @memcpy(shell.logical_path_buf[0..tmp.len], tmp);
@@ -89,8 +78,8 @@ pub fn main(arguments: []const core.Argument) u8 {
 
     dir.setAsCwd() catch |err| {
         switch (err) {
-            error.NotDir => return 2,
-            else => return 1,
+            error.NotDir => return .unknown_error,
+            else => return .unknown_error,
         }
     };
 
@@ -102,5 +91,5 @@ pub fn main(arguments: []const core.Argument) u8 {
     //        };
     //    };
 
-    return 0;
+    return .success;
 }

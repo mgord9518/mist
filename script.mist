@@ -1,0 +1,19 @@
+#! ./zig-out/bin/mist
+#
+# Simple script to test out MIST
+#
+# Notice: as comments are implemented as a no-op command, they must be followed
+# by a space. The only exception is the shebang `#!`, which is aliased to `#`
+
+set "my_quoted_var" "0123456789"
+set var normalText
+
+# The print command only supports using one argument, so all text that is
+# larger than a single word must be within quotes
+print "\$my_quoted_var $my_quoted_var $var"
+echo "$my_var"
+
+# TODO: 
+INVALID COMMAND
+
+ls -l

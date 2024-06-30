@@ -7,27 +7,24 @@ pub const exec_mode: core.ExecMode = .function;
 pub const help = core.Help{
     .description = "un-define a variable",
     .usage = "<VARIABLE NAME>",
-    .options = &.{},
-    .exit_codes = &.{
-        .{
-            .code = 2,
-            .name = "usage error",
-        },
-    },
 };
 
-pub fn main(arguments: []const core.Argument) u8 {
-    if (arguments.len < 1) return 2;
+pub fn main(arguments: []const core.Argument) core.Error {
+    if (arguments.len < 1) return .usage_error;
 
     const name = if (arguments[0] == .positional) blk: {
         break :blk arguments[0].positional;
     } else {
-        return 2;
+        return .usage_error;
     };
 
-    _ = shell.variables.remove(
+    const was_present = shell.variables.remove(
         name,
     );
 
-    return 0;
+    if (!was_present) {
+        return .invalid_variable;
+    }
+
+    return .success;
 }
