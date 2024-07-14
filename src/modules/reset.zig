@@ -5,7 +5,7 @@ pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
     .description = "reset terminal control codes",
-    .usage = "{0s}",
+    .usage = "",
 };
 
 pub fn main(_: []const core.Argument) core.Error {

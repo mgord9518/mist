@@ -1,18 +1,14 @@
 const std = @import("std");
 const core = @import("../main.zig");
 const fg = core.fg;
-const curses = @import("shell/curses.zig");
+const curses = @import("../shell/curses.zig");
 const S = std.posix.S;
 
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
     .description = "list files in a directory",
-    .usage = "[" ++
-        fg(.cyan) ++ "-aU" ++
-        fg(.default) ++ "] [" ++
-        fg(.cyan) ++ "DIRECTORY" ++
-        fg(.default) ++ "]",
+    .usage = core.usage_print("[-alUr1] [DIR]"),
     .options = &.{
         .{ .flag = 'a', .description = "show hidden files" },
         .{ .flag = 'l', .description = "format in long mode" },
@@ -198,7 +194,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     break :blk stat.size;
                 } else 0;
 
-                stdout.print(fg(.default) ++ "{s} {o:0<3} {:>6.2} ", .{
+                stdout.print(fg(.default) ++ "{s} {o:0<3} {:>8.2} ", .{
                     st_buf[0..1],
                     mode & 0o777,
                     fmtIntSizeDec(sz),
@@ -307,7 +303,7 @@ fn formatSizeImpl(comptime base: comptime_int) type {
             if (suffix == ' ') {
                 buf[i] = 'B';
                 buf[i + 1] = ' ';
-                i += 2;
+                i += 1;
             } else switch (base) {
                 1000 => {
                     buf[i..][0..2].* = [_]u8{ suffix, 'B' };

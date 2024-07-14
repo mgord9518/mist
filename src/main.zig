@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const SIG = posix.SIG;
 pub const modules = @import("modules.zig");
+//pub const usage_print = @import("usage_print.zig").usage_print;
 
 /// How a module should be executed when called inside the shell
 pub const ExecMode = enum {
@@ -138,14 +139,17 @@ pub fn main() !void {
 }
 
 pub const ArgumentParser = struct {
-    state: enum {
-        none,
-        flags_ended,
-    } = .none,
+    state: State = .none,
+
     arguments: []const []const u8,
 
     current_arg: usize = 0,
     idx: usize = 0,
+
+    const State = enum {
+        flags_ended,
+        none,
+    };
 
     pub fn init(arguments: []const []const u8) ArgumentParser {
         return .{
@@ -286,11 +290,25 @@ pub const Signal = enum(u6) {
     quit = SIG.QUIT,
     illegal_instruction = SIG.ILL,
     trap = SIG.TRAP,
-    abnormal = SIG.ABRT,
+    abnormal_return = SIG.ABRT,
     bus = SIG.BUS,
     floating_point_exception = SIG.FPE,
     kill = SIG.KILL,
+    usr_1 = SIG.USR1,
     segmentation_fault = SIG.SEGV,
+    usr_2 = SIG.USR2,
+    pipe = SIG.PIPE,
+    alarm = SIG.ALRM,
+    terminate = SIG.TERM,
+    child = SIG.CHLD,
+    @"continue" = SIG.CONT,
+    stop = SIG.STOP,
+    terminal_stop = SIG.TSTP,
+    // TODO SIGTTIN, SIGTTOU
+    urgent = SIG.URG,
+    exceeded_cpu_limit = SIG.XCPU,
+    //exceeded_file_size_limit = SIG.FSZ,
+    virtual_alarm = SIG.VTALRM,
 };
 
 fn sigImpl(signal: Signal, enable: bool) !void {
@@ -317,4 +335,46 @@ pub fn disableSig(signal: Signal) !void {
 
 pub fn enableSig(signal: Signal) !void {
     try sigImpl(signal, true);
+}
+
+pub const colors = struct {
+    pub const required = fg(.yellow);
+    pub const optional = fg(.cyan);
+    pub const module = fg(.green);
+};
+
+pub const UsagePrintState = enum {
+    none,
+    in_grave,
+};
+
+pub fn usage_print(comptime in: []const u8) []const u8 {
+    comptime {
+        var in_grave = false;
+        var out: []const u8 = "";
+
+        for (in) |byte| {
+            out = out ++ switch (byte) {
+                '<' => "<" ++ colors.required,
+                '>' => fg(.default) ++ ">",
+                '[' => "[" ++ colors.optional,
+                ']' => fg(.default) ++ "]",
+                '`' => blk: {
+                    in_grave = !in_grave;
+
+                    if (in_grave) {
+                        break :blk "`" ++ colors.module;
+                    } else {
+                        break :blk fg(.default) ++ "`";
+                    }
+                },
+
+                else => [_]u8{byte},
+            };
+        }
+
+        return out;
+    }
+
+    unreachable;
 }

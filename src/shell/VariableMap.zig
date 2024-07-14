@@ -31,7 +31,6 @@ pub fn put(self: *VariableMap, name: []const u8, value: []const u8) !void {
         break :blk name;
     } else try self.map.allocator.dupe(u8, name);
 
-    // TODO TYPE
     return try self.map.put(
         key,
         try self.map.allocator.dupe(u8, value),

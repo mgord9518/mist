@@ -5,9 +5,8 @@ const fg = core.fg;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "print [" ++ fg(.cyan) ++ "STRING" ++
-        fg(.default) ++ "] to stdout",
-    .usage = "{0s}",
+    .description = core.usage_print("print <STRING> to stdout"),
+    .usage = "<STRING>",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {

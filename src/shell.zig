@@ -1,6 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
-const core = @import("../main.zig");
+const core = @import("main.zig");
+const usage_print = core.usage_print;
+const time = @import("time.zig");
 
 pub const modules = core.modules;
 pub const VariableMap = @import("shell/VariableMap.zig");
@@ -18,7 +20,7 @@ pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
 pub const help = core.Help{
     .description = "minimal interactive shell. use `commands` for a list of built-in commands",
-    .usage = "",
+    .usage = core.usage_print("[SCRIPT]"),
 };
 
 pub var variables: VariableMap = undefined;
@@ -106,16 +108,14 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
                 var mod_args = std.ArrayList(core.Argument).init(allocator);
 
                 if (command.system.arguments != null) {
-                    for (command.system.arguments.?) |arg_str| {
-                        var mod_it = core.ArgumentParser.init(&.{arg_str});
+                    var mod_it = core.ArgumentParser.init(command.system.arguments.?);
 
-                        while (mod_it.next()) |arg| {
-                            try mod_args.append(arg);
+                    while (mod_it.next()) |arg| {
+                        try mod_args.append(arg);
 
-                            if (arg == .option and arg.option.flag == 'h') {
-                                print_help = mod.help;
-                                print_help_name = command.system.name;
-                            }
+                        if (arg == .option and arg.option.flag == 'h') {
+                            print_help = mod.help;
+                            print_help_name = command.system.name;
                         }
                     }
                 }
@@ -164,29 +164,12 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) switch (arg.option.flag) {
-            //'a' => show_hidden = true,
-
-            else => return .usage_error,
-        };
+        if (arg == .option) return .usage_error;
 
         if (arg == .positional) {
             target = arg.positional;
-            std.debug.print("TARGET {?s}\n", .{target});
         }
     }
-
-    _ = stdout.write("\n Welcome to " ++
-        comptime fg(.cyan) ++ "MIST" ++
-        fg(.default) ++ ", a Minimal Interactive Shell inspired by UNIX\n\n" ++
-        "   [X] Command piping\n" ++
-        "   [X] Simple quoting\n" ++
-        "   [X] Escape characters\n" ++
-        "   [-] Plugin system\n" ++
-        "   [ ] Globbing\n\n" ++
-        " For a list of builtin modules, type: " ++
-        fg(.cyan) ++ "commands" ++
-        fg(.default) ++ "\n\n") catch unreachable;
 
     logical_path = std.posix.getcwd(
         &logical_path_buf,
@@ -201,6 +184,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
         nonInteractiveLoop(script_path) catch unreachable;
         return .success;
     }
+
+    _ = stdout.write(comptime usage_print("\n Welcome to [MIST]") ++
+        ", a Minimal Interactive Shell inspired by UNIX\n\n" ++
+        usage_print("   [X] Command piping\n") ++
+        usage_print("   [X] Simple quoting\n") ++
+        usage_print("   [X] Escape characters\n") ++
+        usage_print("   [-] Plugin system\n") ++
+        usage_print("   [ ] Globbing\n\n") ++
+        usage_print(" For a list of builtin modules, type: `commands`") ++
+        fg(.default) ++ "\n\n") catch unreachable;
 
     aliases = std.StringHashMap(Command).init(allocator);
     defer aliases.deinit();
@@ -328,6 +321,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 }
             }
 
+            if (char == '\t') print_handled = true;
+
             // ANSI control
             if (char == '\x1b') {
                 print_handled = true;
@@ -416,7 +411,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 while (idx <= continue_len) : (idx += 1) {
                     _ = line.insert(cursor_pos + idx, utf8_buf[idx]) catch return .unknown_error;
                 }
-                //_ = line_text.insert(cursor_pos, codepoint) catch return 1;
+
                 cursor.savePosition();
                 // Print updated line
                 stdout.print("{s}", .{line.items[cursor_pos..]}) catch return .unknown_error;
@@ -427,14 +422,12 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 // Return to cursor position
                 cursor.restorePosition();
                 cursor.move(.right, 1);
-                //cursor.move(.left, line.items[cursor_pos..].len);
             }
         }
 
         if (restart) continue;
 
         var it = parser.SyntaxIterator.init(
-            //allocator,
             arena_allocator,
             line.items,
         ) catch return .unknown_error;
@@ -458,16 +451,14 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 var mod_args = std.ArrayList(core.Argument).init(allocator);
 
                 if (command.system.arguments != null) {
-                    for (command.system.arguments.?) |arg_str| {
-                        var mod_it = core.ArgumentParser.init(&.{arg_str});
+                    var mod_it = core.ArgumentParser.init(command.system.arguments.?);
 
-                        while (mod_it.next()) |arg| {
-                            mod_args.append(arg) catch unreachable;
+                    while (mod_it.next()) |arg| {
+                        mod_args.append(arg) catch unreachable;
 
-                            if (arg == .option and arg.option.flag == 'h') {
-                                print_help = mod.help;
-                                print_help_name = command.system.name;
-                            }
+                        if (arg == .option and arg.option.flag == 'h') {
+                            print_help = mod.help;
+                            print_help_name = command.system.name;
                         }
                     }
                 }
@@ -515,9 +506,9 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
         if (exit_status.ret == .module_exit_failure) {
             const mod_name = pipe_line.items[exit_status.idx].module.name;
-            const mod = core.module_list.get(mod_name) orelse unreachable;
 
             if (exit_status.ret.module_exit_failure == .usage_error) {
+                const mod = core.module_list.get(mod_name) orelse unreachable;
                 core.printHelp(mod_name, mod.help) catch {};
             }
         }
@@ -534,9 +525,8 @@ fn statusCode(
     return switch (exec_status) {
         .success => 0,
         .signal => |signal| @as(u8, @intFromEnum(signal)) + 127,
-        // TODO
         .exec_failure => 127,
-        .status => |status| status.exit_code,
+        .exit_code => |exit_code| exit_code,
         .module_exit_failure => |err| @intFromEnum(err),
     };
 }
@@ -553,7 +543,7 @@ fn statusName(
 
             return @tagName(err);
         },
-        .status => null,
+        .exit_code => null,
     };
 }
 

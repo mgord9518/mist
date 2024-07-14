@@ -187,7 +187,7 @@ pub const Timestamp = struct {
     seconds: i64,
 
     // Must be between 0 and 1,000,000,000
-    nanoseconds: u32 = 0,
+    nanoseconds: u30 = 0,
 
     pub fn nowUtc() Timestamp {
         const unix_nanoseconds = std.time.nanoTimestamp();

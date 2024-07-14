@@ -9,8 +9,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        //  .use_llvm = false,
     });
+
+    const base91_dep = b.dependency("base91", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const base91_module = base91_dep.module("base91");
+    exe.root_module.addImport("base91", base91_module);
 
     if (false) {
         const zware_dep = b.dependency("zware", .{

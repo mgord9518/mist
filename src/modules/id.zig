@@ -7,10 +7,8 @@ const allocator = std.heap.page_allocator;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "print information about [" ++ fg(.cyan) ++ "USER" ++ fg(.default) ++ "] or the current user",
-    .usage = "[" ++
-        fg(.cyan) ++ "-ugGnr" ++
-        fg(.default) ++ "] [USER]",
+    .description = core.usage_print("print information about [USER] or the current user"),
+    .usage = core.usage_print("[-ugGnr] [USER]"),
     .options = &.{
         .{ .flag = 'u', .description = "print UID" },
         .{ .flag = 'g', .description = "print GID" },
@@ -36,7 +34,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     for (arguments) |arg| {
         if (arg == .positional) {
             // TODO error handling
-            if (username != null) unreachable;
+            if (username != null) return .usage_error;
 
             username = arg.positional;
 
@@ -199,48 +197,6 @@ const PasswdIterator = struct {
             .home = split.next() orelse return eol,
             .shell = split.next() orelse return eol,
         };
-    }
-
-    pub fn nextOld(it: *PasswdIterator) !?PasswdEntry {
-        it.list.shrinkRetainingCapacity(0);
-        const eol = Error.UnexpectedEndOfLine;
-
-        var entry = PasswdEntry{
-            .username = undefined,
-            .password = "",
-            .uid = 69,
-            .gid = 69,
-            .gecos = "",
-            .home = "/bruh",
-            .shell = "/bin/ligma",
-        };
-
-        try it.file.reader().streamUntilDelimiter(
-            it.list.writer(),
-            '\n',
-            null,
-        );
-
-        var split = std.mem.split(u8, it.list.items, ":");
-
-        entry.username = split.next() orelse return eol;
-        entry.password = split.next() orelse return eol;
-        entry.uid = try std.fmt.parseInt(
-            u16,
-            split.next() orelse return eol,
-            10,
-        );
-        entry.gid = try std.fmt.parseInt(
-            u16,
-            split.next() orelse return eol,
-            10,
-        );
-
-        entry.gecos = split.next() orelse return eol;
-        entry.home = split.next() orelse return eol;
-        entry.shell = split.next() orelse return eol;
-
-        return entry;
     }
 };
 

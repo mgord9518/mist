@@ -7,19 +7,13 @@
 const std = @import("std");
 const posix = std.posix;
 
-const core = @import("../../main.zig");
+const core = @import("../main.zig");
 const shell = @import("../shell.zig");
 const Command = shell.Command;
 
 const modules = shell.modules;
 
-const IntErr = std.meta.Int(
-    .unsigned,
-    @bitSizeOf(anyerror),
-);
-
 pub const ChainRet = struct {
-    //status: Status,
     ret: Return,
 
     // The index of the command that failed (if any)
@@ -27,8 +21,8 @@ pub const ChainRet = struct {
     idx: usize,
 
     pub const Status = packed struct {
-        signal: core.Signal = .none,
-        _: u1 = undefined,
+        signal: core.Signal,
+        _7: u1 = undefined,
         core_dump: bool = false,
         exit_code: u8,
     };
@@ -42,10 +36,9 @@ pub const ChainRet = struct {
 
         // Command was successfully executed, if the command exited with a
         // non-zero status, this will be populated
-        status: Status,
+        exit_code: u8,
 
-        // Builtin module waa executed, returned something besides
-        // `.success`
+        // Builtin module was executed, returned something besides `success`
         module_exit_failure: core.Error,
 
         // Command failed to execute, this most likely means the command
@@ -64,16 +57,16 @@ pub fn chainCommands(
     defer arena.deinit();
 
     // TODO: proper error handling
-    const pipes = allocator.alloc(
+    const pipes = try allocator.alloc(
         [2]posix.fd_t,
         commands.len - 1,
-    ) catch unreachable;
+    );
     defer allocator.free(pipes);
 
-    const error_pipes = allocator.alloc(
+    const error_pipes = try allocator.alloc(
         [2]posix.fd_t,
         commands.len,
-    ) catch unreachable;
+    );
     defer allocator.free(error_pipes);
 
     // Open all pipes
@@ -97,6 +90,12 @@ pub fn chainCommands(
     for (std.os.environ, 0..) |env, idx| {
         t[idx] = env;
     }
+
+    var pid_map = std.AutoHashMap(
+        posix.pid_t,
+        usize,
+    ).init(allocator);
+    defer pid_map.deinit();
 
     t[environ_len - 1] = "bruh:u32=\x45\x00\x00\x00";
 
@@ -149,6 +148,7 @@ pub fn chainCommands(
         }
 
         const pid = posix.fork() catch unreachable;
+        try pid_map.put(pid, idx);
 
         // Parent
         if (pid != 0) continue;
@@ -159,12 +159,12 @@ pub fn chainCommands(
         if (commands.len > 1) {
             // > first command
             if (idx > 0) {
-                posix.dup2(pipes[idx - 1][0], posix.STDIN_FILENO) catch unreachable;
+                try posix.dup2(pipes[idx - 1][0], posix.STDIN_FILENO);
             }
 
             // < last command
             if (idx < commands.len - 1) {
-                posix.dup2(pipes[idx][1], posix.STDOUT_FILENO) catch unreachable;
+                try posix.dup2(pipes[idx][1], posix.STDOUT_FILENO);
             }
         }
 
@@ -198,8 +198,6 @@ pub fn chainCommands(
                 else => unreachable,
             };
 
-            //const u8_err: [@sizeOf(anyerror)]u8 = @bitCast(@intFromError(err));
-
             _ = posix.write(
                 error_pipes[idx][1],
                 &.{@intFromEnum(errno)},
@@ -210,10 +208,7 @@ pub fn chainCommands(
                 posix.close(pipe[1]);
             }
 
-            //shell.child_error.* = @intFromError(err);
-            // TODO: check error
             posix.exit(127);
-            //};
         }
     }
 
@@ -247,27 +242,28 @@ pub fn chainCommands(
     };
 
     // Wait for all commands to exit
-    //var idx: usize = 0;
-    for (commands, 0..) |_, idx| {
-        //while (idx < commands.len) : (idx += 1) {
-        const s: u16 = @truncate(posix.waitpid(-1, 0).status);
+    for (commands) |_| {
+        const wait_res = posix.waitpid(-1, 0);
+
+        const s: u16 = @truncate(wait_res.status);
         const status: ChainRet.Status = @bitCast(s);
+        const idx = pid_map.get(wait_res.pid).?;
 
-        if (s != 0 and ret.ret == .success) {
-            ret.ret = if (@intFromEnum(status.signal) != 0) blk: {
-                break :blk .{ .signal = status.signal };
-            } else blk: {
-                if (commands[idx] == .system) {
-                    break :blk .{ .status = status };
-                } else {
-                    break :blk .{
-                        .module_exit_failure = @enumFromInt(status.exit_code),
-                    };
-                }
-            };
+        if (s == 0 or ret.ret != .success) continue;
 
-            ret.idx = idx;
-        }
+        ret.idx = idx;
+
+        ret.ret = if (@intFromEnum(status.signal) != 0) blk: {
+            break :blk .{ .signal = status.signal };
+        } else blk: {
+            if (commands[idx] == .system) {
+                break :blk .{ .exit_code = status.exit_code };
+            } else {
+                break :blk .{
+                    .module_exit_failure = @enumFromInt(status.exit_code),
+                };
+            }
+        };
     }
 
     return ret;

@@ -1,9 +1,9 @@
 #! ./zig-out/bin/mist
-#
+
 # Simple script to test out MIST
 #
 # Notice: as comments are implemented as a no-op command, they must be followed
-# by a space. The only exception is the shebang `#!`, which is aliased to `#`
+# by a space. The only exception is the shebang (#!), which is hard-aliased to `#`
 
 set "my_quoted_var" "0123456789"
 set var normalText

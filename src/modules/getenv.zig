@@ -7,8 +7,7 @@ pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
     .description = "print an environment variable to stdout",
-    .usage = "[" ++ fg(.cyan) ++ "STRING" ++
-        fg(.default) ++ "]",
+    .usage = core.usage_print("<ENV_VAR>"),
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
@@ -31,7 +30,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         }
     }
 
-    const v = target orelse return .unknown_error;
+    const v = target orelse return .usage_error;
 
     // Only allocate if needed
     if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {

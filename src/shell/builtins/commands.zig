@@ -1,5 +1,5 @@
 const std = @import("std");
-const core = @import("../../../main.zig");
+const core = @import("../../main.zig");
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .fork;
@@ -17,7 +17,7 @@ pub fn main(_: []const core.Argument) core.Error {
 
         if (mod.no_display) continue;
 
-        stdout.print(fg(.yellow) ++ "{s}" ++
+        stdout.print(core.colors.module ++ "{s:>8}" ++
             fg(.default) ++ ": {s}\n", .{
             k,
             mod.help.?.description,

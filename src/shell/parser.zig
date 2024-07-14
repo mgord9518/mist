@@ -169,6 +169,13 @@ pub const SyntaxIterator = struct {
                         it.pos += 1;
                         return .{ .separator = .pipe };
                     }
+
+                    if (backslash_escape) {
+                        should_add = true;
+                        backslash_escape = false;
+                    } else if (it.in_quotes) {
+                        should_add = true;
+                    }
                 },
                 '\\' => {
                     if (backslash_escape) {

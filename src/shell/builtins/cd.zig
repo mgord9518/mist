@@ -1,6 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
-const core = @import("../../../main.zig");
+const core = @import("../../main.zig");
 const shell = @import("../../shell.zig");
 const fg = core.fg;
 

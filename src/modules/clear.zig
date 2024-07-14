@@ -5,13 +5,13 @@ pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
     .description = "clear the screen",
-    .usage = "{0s}",
+    .usage = "",
 };
 
 pub fn main(_: []const core.Argument) core.Error {
     const stdout = std.io.getStdOut().writer();
 
-    stdout.print("\x1bc", .{}) catch {};
+    stdout.print("\x1bc", .{}) catch return .unknown_error;
 
     return .success;
 }
