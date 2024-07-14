@@ -2,6 +2,7 @@
 
 pub const mist = @import("shell.zig");
 
+pub const @">" = @import("modules/>.zig");
 pub const clear = @import("modules/clear.zig");
 pub const id = @import("modules/id.zig");
 pub const yes = @import("modules/yes.zig");

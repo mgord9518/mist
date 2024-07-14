@@ -3,6 +3,7 @@ const posix = std.posix;
 const core = @import("main.zig");
 const usage_print = core.usage_print;
 const time = @import("time.zig");
+const greeting = @embedFile("greeting");
 
 pub const modules = core.modules;
 pub const VariableMap = @import("shell/VariableMap.zig");
@@ -185,15 +186,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         return .success;
     }
 
-    _ = stdout.write(comptime usage_print("\n Welcome to [MIST]") ++
-        ", a Minimal Interactive Shell inspired by UNIX\n\n" ++
-        usage_print("   [X] Command piping\n") ++
-        usage_print("   [X] Simple quoting\n") ++
-        usage_print("   [X] Escape characters\n") ++
-        usage_print("   [-] Plugin system\n") ++
-        usage_print("   [ ] Globbing\n\n") ++
-        usage_print(" For a list of builtin modules, type: `commands`") ++
-        fg(.default) ++ "\n\n") catch unreachable;
+    _ = stdout.write(comptime usage_print(greeting)) catch unreachable;
 
     aliases = std.StringHashMap(Command).init(allocator);
     defer aliases.deinit();

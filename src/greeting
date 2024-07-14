@@ -1,0 +1,10 @@
+
+ Welcome to [MIST] -- a Minimal Interactive Shell inspired by UNIX
+
+ Immediate TODO:
+   [ ] Tab-finish
+   [ ] Globbing (implemented via command)
+   [-] Plugin system
+
+ For a list of builtin modules, type: `commands`
+
