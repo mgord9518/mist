@@ -5,7 +5,7 @@ const fg = core.fg;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = core.usage_print("print <STRING> to stdout"),
+    .description = "print <STRING> to STDOUT",
     .usage = "<STRING>",
 };
 

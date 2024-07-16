@@ -8,7 +8,7 @@ pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
     .description = "list files in a directory",
-    .usage = core.usage_print("[-alUr1] [DIR]"),
+    .usage = "[-alUr1] [DIR]",
     .options = &.{
         .{ .flag = 'a', .description = "show hidden files" },
         .{ .flag = 'l', .description = "format in long mode" },
@@ -91,23 +91,23 @@ pub fn main(arguments: []const core.Argument) core.Error {
         };
 
         const color = switch (entry.kind) {
-            .directory => fg(.bright_blue),
+            .directory => core.colors.fs.directory,
 
             // TODO: detect broken links
-            .sym_link => fg(.cyan),
-            .character_device, .block_device => fg(.yellow),
+            .sym_link => core.colors.fs.sym_link,
+            .character_device, .block_device => core.colors.fs.device,
             else => blk: {
                 const st = stat orelse {
-                    break :blk fg(.default);
+                    break :blk core.colors.fs.file;
                 };
 
                 const can_exec = (st.mode & S.IXUSR) |
                     (st.mode & S.IXGRP) |
                     (st.mode & S.IXOTH) > 0;
                 if (can_exec) {
-                    break :blk fg(.bright_green);
+                    break :blk core.colors.fs.executable;
                 }
-                break :blk fg(.default);
+                break :blk core.colors.fs.file;
             },
         };
 
@@ -239,6 +239,7 @@ const SortContext = struct {
 fn sortFn(ctx: SortContext, a: Entry, b: Entry) bool {
     const ret = switch (ctx.order) {
         .alphabetic => sortByAlphabet({}, a, b),
+        //.alphabetic => sortByAlphabetBytes({}, a, b),
         .size => sortBySize({}, a, b),
     };
 
@@ -254,8 +255,61 @@ fn sortBySize(_: void, a: Entry, b: Entry) bool {
     return sz_a > sz_b;
 }
 
-const formatSizeDec = formatSizeImpl(1000).formatSizeImpl;
+/// Sorts UTF-8 strings ordered by lower to higher codepoints preferring
+/// shorter strings.
+fn sortByAlphabet(_: void, a: Entry, b: Entry) bool {
+    var utf8_view_a = std.unicode.Utf8View.init(
+        a.path,
+    ) catch return true;
 
+    var utf8_view_b = std.unicode.Utf8View.init(
+        b.path,
+    ) catch return false;
+
+    var it_a = utf8_view_a.iterator();
+    var it_b = utf8_view_b.iterator();
+
+    while (true) {
+        const codepoint_a = it_a.nextCodepoint() orelse return true;
+        const codepoint_b = it_b.nextCodepoint() orelse return false;
+
+        if (codepoint_a > codepoint_b) {
+            return false;
+        } else if (codepoint_a < codepoint_b) {
+            return true;
+        }
+    }
+
+    unreachable;
+}
+
+/// Sorts strings by byte values. This is smaller and simpler than the UTF-8
+/// version but will not properly sort Unicode strings
+fn sortByAlphabetBytes(_: void, a: Entry, b: Entry) bool {
+    var a_idx: usize = 0;
+    var b_idx: usize = 0;
+
+    while (true) {
+        const char_a = a.path[a_idx];
+        const char_b = b.path[b_idx];
+
+        if (char_a > char_b) {
+            return false;
+        } else if (char_a < char_b) {
+            return true;
+        }
+
+        a_idx += 1;
+        b_idx += 1;
+
+        if (a_idx >= a.path.len) return true;
+        if (b_idx >= b.path.len) return false;
+    }
+
+    unreachable;
+}
+
+const formatSizeDec = formatSizeImpl(1000).formatSizeImpl;
 pub fn fmtIntSizeDec(value: u64) std.fmt.Formatter(formatSizeDec) {
     return .{ .data = value };
 }
@@ -319,32 +373,4 @@ fn formatSizeImpl(comptime base: comptime_int) type {
             return std.fmt.formatBuf(buf[0..i], options, writer);
         }
     };
-}
-
-/// Sorts UTF-8 strings ordered by lower to higher codepoints preferring
-/// shorter strings.
-fn sortByAlphabet(_: void, a: Entry, b: Entry) bool {
-    var utf8_view_a = std.unicode.Utf8View.init(
-        a.path,
-    ) catch return true;
-
-    var utf8_view_b = std.unicode.Utf8View.init(
-        b.path,
-    ) catch return false;
-
-    var it_a = utf8_view_a.iterator();
-    var it_b = utf8_view_b.iterator();
-
-    while (true) {
-        const codepoint_a = it_a.nextCodepoint() orelse return true;
-        const codepoint_b = it_b.nextCodepoint() orelse return false;
-
-        if (codepoint_a > codepoint_b) {
-            return false;
-        } else if (codepoint_a < codepoint_b) {
-            return true;
-        }
-    }
-
-    unreachable;
 }

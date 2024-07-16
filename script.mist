@@ -13,7 +13,10 @@ set var normalText
 print "\$my_quoted_var $my_quoted_var $var"
 echo "$my_var"
 
-# TODO: 
 INVALID COMMAND
+
+# TODO: not sure about this if syntax, it was very easy to implement though
+if true : print "TRUE"
+if false : print "FALSE"
 
 ls -l

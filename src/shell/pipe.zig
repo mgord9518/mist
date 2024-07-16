@@ -139,7 +139,9 @@ pub fn chainCommands(
 
                     return .{
                         .idx = 0,
-                        .ret = .{
+                        .ret = if (exit_code == .success) blk: {
+                            break :blk .success;
+                        } else .{
                             .module_exit_failure = exit_code,
                         },
                     };
@@ -259,6 +261,10 @@ pub fn chainCommands(
             if (commands[idx] == .system) {
                 break :blk .{ .exit_code = status.exit_code };
             } else {
+                if (status.exit_code == 0) {
+                    break :blk .success;
+                }
+
                 break :blk .{
                     .module_exit_failure = @enumFromInt(status.exit_code),
                 };

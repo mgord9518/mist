@@ -8,7 +8,7 @@ pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
     .description = "change working directory",
-    .usage = "[DIRECTORY]",
+    .usage = "[DIR]",
 };
 
 var previous_dir: ?[]const u8 = null;

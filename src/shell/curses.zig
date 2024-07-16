@@ -65,6 +65,49 @@ pub fn clearLine(mode: ClearMode) void {
     stdout.print("\x1b[{c}K", .{@intFromEnum(mode)}) catch {};
 }
 
+pub const TerminalMode = enum {
+    normal,
+    raw,
+};
+
+pub fn setTerminalMode(mode: TerminalMode) !void {
+    var term_info = try std.posix.tcgetattr(
+        std.posix.STDIN_FILENO,
+    );
+
+    switch (mode) {
+        .normal => {
+            term_info.lflag.ECHO = true;
+            term_info.lflag.ICANON = true;
+        },
+        .raw => {
+            term_info.lflag.ECHO = false;
+            term_info.lflag.ICANON = false;
+        },
+    }
+
+    try std.posix.tcsetattr(
+        std.posix.STDIN_FILENO,
+        .NOW,
+        term_info,
+    );
+}
+
+fn setTerminalToNormalMode() !void {
+    var term_info = try std.posix.tcgetattr(
+        std.posix.STDIN_FILENO,
+    );
+
+    term_info.lflag.ECHO = true;
+    term_info.lflag.ICANON = true;
+
+    try std.posix.tcsetattr(
+        std.posix.STDIN_FILENO,
+        .NOW,
+        term_info,
+    );
+}
+
 fn setTerminalToRawMode() !void {
     var term_info = try std.posix.tcgetattr(
         std.posix.STDIN_FILENO,

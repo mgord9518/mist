@@ -7,8 +7,8 @@ const allocator = std.heap.page_allocator;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = core.usage_print("print information about [USER] or the current user"),
-    .usage = core.usage_print("[-ugGnr] [USER]"),
+    .description = "print information about [USER] or the current user",
+    .usage = "[-ugGnr] [USER]",
     .options = &.{
         .{ .flag = 'u', .description = "print UID" },
         .{ .flag = 'g', .description = "print GID" },

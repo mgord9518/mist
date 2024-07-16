@@ -1,16 +1,15 @@
 const std = @import("std");
-const core = @import("../main.zig");
-const time = @import("../time.zig");
+const core = @import("../../main.zig");
 const fg = core.fg;
 const builtin = @import("builtin");
-const pipe = @import("../shell/pipe.zig");
-const shell = @import("../shell.zig");
+const pipe = @import("../../shell/pipe.zig");
+const shell = @import("../../shell.zig");
 
-pub const exec_mode: core.ExecMode = .fork;
+pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
-    .description = "times a program, printing results to STDERR",
-    .usage = "-- <PROGRAM> [PROGRAM_ARGS]",
+    .description = "runs a program, then executes code within `{}` if exited successfully",
+    .usage = "<PROGRAM> { ... }",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
@@ -24,8 +23,22 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var sys_args: ?[][]const u8 = null;
 
+    var args = if (arguments.len > 1) arguments[1..] else &[_]core.Argument{};
+
+    for (args, 0..) |arg, idx| {
+        if (arg == .option) switch (arg.option.flag) {
+            else => return .usage_error,
+        };
+
+        if (arg == .positional) {
+            if (std.mem.eql(u8, arg.positional, ":")) {
+                args = args[0..idx];
+                break;
+            }
+        }
+    }
+
     const command_name = arguments[0].positional;
-    const args = if (arguments.len > 1) arguments[1..] else null;
     var command = shell.Command{ .system = .{
         .name = command_name,
     } };
@@ -34,16 +47,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
     if (core.module_list.get(command_name)) |_| {
         command = .{ .module = .{
             .name = command.system.name,
-            .arguments = args orelse &.{},
+            .arguments = args,
         } };
     } else {
         sys_args = allocator.alloc(
             []const u8,
-            arguments.len - 1,
+            args.len,
         ) catch unreachable;
 
-        for (arguments[1..], 0..) |_, idx| {
-            switch (arguments[1..][idx]) {
+        for (args, 0..) |_, idx| {
+            switch (args[idx]) {
                 .option => |opt| {
                     sys_args.?[idx] = std.fmt.allocPrint(
                         allocator,
@@ -60,30 +73,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
         command.system.arguments = sys_args.?;
     }
 
-    const begin_time = time.Timestamp.nowUtc();
-
     const exit_status = pipe.chainCommands(
         allocator,
         &.{command},
     ) catch unreachable;
     _ = &exit_status;
 
-    const end_time = time.Timestamp.nowUtc();
-
-    var ndif = @as(i31, end_time.nanoseconds) - begin_time.nanoseconds;
-    var dif = end_time.seconds - begin_time.seconds;
-    if (ndif < 0) {
-        ndif += 1_000_000_000;
-        dif -= 1;
-    }
-
-    std.debug.print("{d}.{d:0>3}\n", .{
-        dif,
-        @as(u30, @intCast(ndif)) / 1_000_000,
-    });
+    if (exit_status.ret != .success) return .success;
 
     if (sys_args != null) {
-        for (arguments[1..], 0..) |arg, idx| {
+        for (args, 0..) |arg, idx| {
             if (arg == .option) {
                 allocator.free(sys_args.?[idx]);
             }
@@ -92,7 +91,30 @@ pub fn main(arguments: []const core.Argument) core.Error {
         allocator.free(sys_args.?);
     }
 
-    return switch (exit_status.ret) {
+    if (arguments[args.len..].len <= 2) return .usage_error;
+
+    const run_command_name = arguments[args.len..][2].positional;
+
+    var run_command = shell.Command{ .system = .{
+        .name = run_command_name,
+    } };
+
+    // Convert to module command if it exists
+    if (core.module_list.get(run_command_name)) |_| {
+        run_command = .{
+            .module = .{
+                .name = run_command.system.name,
+                .arguments = arguments[args.len..][3..],
+            },
+        };
+    } else {}
+
+    const run_exit_status = pipe.chainCommands(
+        allocator,
+        &.{run_command},
+    ) catch unreachable;
+
+    return switch (run_exit_status.ret) {
         .exec_failure => .command_not_found,
         else => .success,
     };

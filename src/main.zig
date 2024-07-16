@@ -36,6 +36,13 @@ pub const Error = enum(u7) {
 
     // Memory
     out_of_memory = 80,
+    no_space_left = 81,
+
+    // Encoding/ compression
+    corrupt_input = 96,
+
+    // Misc
+    false = 112,
 
     // Exec
     command_cannot_execute = 126,
@@ -213,18 +220,19 @@ pub fn printHelp(name: []const u8, h: ?Help) !void {
     const stdout = stdout_file.writer();
 
     try stdout.print(
-        \\{3s}usage{2s}: {4s} {0s}
-        \\
-        \\{1s}
-        \\
-        \\
+        \\{2s}usage{1s}: {0s} 
     , .{
-        help.usage,
-        help.description,
+        name,
         fg(.default),
         fg(.yellow),
-        name,
     });
+
+    try usagePrint(stdout, help.usage);
+
+    try stdout.print("\n\n", .{});
+
+    try usagePrint(stdout, help.usage);
+    try stdout.print("\n", .{});
 
     if (help.options) |options| {
         try stdout.print(
@@ -276,12 +284,6 @@ pub fn fg(comptime color: ColorName) [:0]const u8 {
         "\x1b[;{d}m",
         .{@intFromEnum(color)},
     );
-}
-
-pub fn printError(comptime fmt: []const u8, args: anytype) void {
-    //std.debug.print(fg(.red) ++ "shell:ls " ++ fg(.default) ++ fmt, args);
-    //std.debug.print("shell " ++ fg(.red) ++ ":: " ++ fg(.default) ++ fmt, args);
-    std.debug.print(fg(.red) ++ ":: " ++ fg(.default) ++ fmt, args);
 }
 
 pub const Signal = enum(u6) {
@@ -341,40 +343,36 @@ pub const colors = struct {
     pub const required = fg(.yellow);
     pub const optional = fg(.cyan);
     pub const module = fg(.green);
+
+    pub const fs = struct {
+        pub const file = fg(.default);
+        pub const directory = fg(.bright_blue);
+        pub const sym_link = fg(.cyan);
+        pub const device = fg(.yellow);
+        pub const executable = fg(.bright_green);
+    };
 };
 
-pub const UsagePrintState = enum {
-    none,
-    in_grave,
-};
+pub fn usagePrint(writer: anytype, in: []const u8) !void {
+    var in_grave = false;
 
-pub fn usage_print(comptime in: []const u8) []const u8 {
-    comptime {
-        var in_grave = false;
-        var out: []const u8 = "";
+    for (in) |byte| {
+        _ = try writer.write(switch (byte) {
+            '<' => "<" ++ colors.required,
+            '>' => comptime fg(.default) ++ ">",
+            '[' => "[" ++ colors.optional,
+            ']' => comptime fg(.default) ++ "]",
+            '`' => blk: {
+                in_grave = !in_grave;
 
-        for (in) |byte| {
-            out = out ++ switch (byte) {
-                '<' => "<" ++ colors.required,
-                '>' => fg(.default) ++ ">",
-                '[' => "[" ++ colors.optional,
-                ']' => fg(.default) ++ "]",
-                '`' => blk: {
-                    in_grave = !in_grave;
+                if (in_grave) {
+                    break :blk "`" ++ colors.module;
+                } else {
+                    break :blk comptime fg(.default) ++ "`";
+                }
+            },
 
-                    if (in_grave) {
-                        break :blk "`" ++ colors.module;
-                    } else {
-                        break :blk fg(.default) ++ "`";
-                    }
-                },
-
-                else => [_]u8{byte},
-            };
-        }
-
-        return out;
+            else => &[_]u8{byte},
+        });
     }
-
-    unreachable;
 }

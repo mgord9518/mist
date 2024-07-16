@@ -6,8 +6,11 @@ const base91 = @import("base91");
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = core.usage_print("convert data from STDIN to base91, printing it to STDOUT"),
+    .description = "convert data from STDIN to base91, printing it to STDOUT",
     .usage = "[-d]",
+    .options = &.{
+        .{ .flag = 'd', .description = "decode" },
+    },
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {

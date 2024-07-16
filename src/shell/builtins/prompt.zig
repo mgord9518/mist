@@ -11,7 +11,6 @@ pub const no_display = true;
 const base_color = fg(.default);
 
 const prompt = base_color ++ "┌┤ {s}{s} " ++
-    //    base_color ++ "│" ++ fg(.default) ++ " {d:0>2}:{d:0>2}:{d:0>2} " ++
     base_color ++ "│ {s}" ++
     base_color ++ " │\n└─" ++ fg(.default) ++ " ";
 
@@ -131,14 +130,9 @@ pub fn main(_: []const core.Argument) core.Error {
         ) catch unreachable;
     };
 
-    //    const date = time.Date.nowLocal();
-
     stdout.print(prompt, .{
         color,
         colorized_path.items,
-        //        date.hours,
-        //        date.minutes,
-        //        date.seconds,
         str,
     }) catch {};
 

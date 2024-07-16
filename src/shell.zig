@@ -1,7 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
 const core = @import("main.zig");
-const usage_print = core.usage_print;
 const time = @import("time.zig");
 const greeting = @embedFile("greeting");
 
@@ -10,7 +9,7 @@ pub const VariableMap = @import("shell/VariableMap.zig");
 
 const pipe = @import("shell/pipe.zig");
 const parser = @import("shell/parser.zig");
-const cursor = @import("shell/curses.zig");
+const curses = @import("shell/curses.zig");
 const History = @import("shell/History.zig");
 const fg = core.fg;
 
@@ -21,7 +20,7 @@ pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
 pub const help = core.Help{
     .description = "minimal interactive shell. use `commands` for a list of built-in commands",
-    .usage = core.usage_print("[SCRIPT]"),
+    .usage = "[SCRIPT]",
 };
 
 pub var variables: VariableMap = undefined;
@@ -56,8 +55,10 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
     var previous_status: u8 = 0;
     var previous_status_name: ?[]const u8 = null;
 
+    var line_num: usize = 1;
+
     var reader = file.reader();
-    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| : (line_num += 1) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         const arena_allocator = arena.allocator();
         defer arena.deinit();
@@ -151,9 +152,21 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
         );
 
         if (previous_status_name) |err_name| {
-            core.printError("{s}\n", .{err_name});
+            printError("{s}\n", line_num, .{err_name});
         }
     }
+}
+
+pub fn printError(comptime fmt: []const u8, line_num: usize, args: anytype) void {
+    std.debug.print(
+        fg(.red) ++ "error at line {d} :: " ++ fg(.default),
+        .{line_num},
+    );
+
+    std.debug.print(
+        fmt,
+        args,
+    );
 }
 
 pub fn main(arguments: []const core.Argument) core.Error {
@@ -186,7 +199,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         return .success;
     }
 
-    _ = stdout.write(comptime usage_print(greeting)) catch unreachable;
+    core.usagePrint(stdout, greeting) catch unreachable;
 
     aliases = std.StringHashMap(Command).init(allocator);
     defer aliases.deinit();
@@ -209,7 +222,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     // Main loop
     while (true) {
-        setTerminalToRawMode() catch return .unknown_error;
+        curses.setTerminalMode(.raw) catch return .unknown_error;
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         const arena_allocator = arena.allocator();
@@ -295,7 +308,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
             if (char == '\x7f') {
                 print_handled = true;
                 if (cursor_pos > 0) {
-                    cursor.backspace();
+                    curses.backspace();
                     cursor_pos -= 1;
                     vcursor_pos -= 1;
 
@@ -332,7 +345,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                         line.shrinkAndFree(0);
                         line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
 
-                        cursor.move(.left, vcursor_pos);
+                        curses.move(.left, vcursor_pos);
                         stdout.print("\x1b[0K", .{}) catch return .unknown_error;
 
                         stdout.print("{s}", .{line.items}) catch return .unknown_error;
@@ -352,8 +365,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
                             line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
                         }
 
-                        cursor.move(.left, cursor_pos);
-                        cursor.clearLine(.right);
+                        curses.move(.left, cursor_pos);
+                        curses.clearLine(.right);
 
                         stdout.print("{s}", .{line.items}) catch return .unknown_error;
                         cursor_pos = line.items.len;
@@ -364,7 +377,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                         if (cursor_pos < line.items.len) {
                             const remaining = utf8ContinueLen(line.items[cursor_pos]);
 
-                            cursor.move(.right, 1);
+                            curses.move(.right, 1);
                             cursor_pos += 1 + remaining;
                             vcursor_pos += 1 + remaining;
                         }
@@ -373,7 +386,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     },
                     'D' => {
                         if (cursor_pos > 0) {
-                            cursor.move(.left, 1);
+                            curses.move(.left, 1);
                             cursor_pos -= 1;
                             vcursor_pos -= 1;
                         }
@@ -405,7 +418,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     _ = line.insert(cursor_pos + idx, utf8_buf[idx]) catch return .unknown_error;
                 }
 
-                cursor.savePosition();
+                curses.savePosition();
                 // Print updated line
                 stdout.print("{s}", .{line.items[cursor_pos..]}) catch return .unknown_error;
 
@@ -413,8 +426,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 vcursor_pos += 1;
 
                 // Return to cursor position
-                cursor.restorePosition();
-                cursor.move(.right, 1);
+                curses.restorePosition();
+                curses.move(.right, 1);
             }
         }
 
@@ -479,7 +492,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
         if (pipe_line.items.len == 0) continue;
 
-        setTerminalToNormalMode() catch return .unknown_error;
+        curses.setTerminalMode(.normal) catch return .unknown_error;
 
         previous_status = 0;
         previous_status_name = null;
@@ -560,34 +573,4 @@ fn getChar() u8 {
     };
 
     return buf[0];
-}
-
-fn setTerminalToRawMode() !void {
-    var term_info = try std.posix.tcgetattr(
-        std.posix.STDIN_FILENO,
-    );
-
-    term_info.lflag.ECHO = false;
-    term_info.lflag.ICANON = false;
-
-    try std.posix.tcsetattr(
-        std.posix.STDIN_FILENO,
-        .NOW,
-        term_info,
-    );
-}
-
-fn setTerminalToNormalMode() !void {
-    var term_info = try std.posix.tcgetattr(
-        std.posix.STDIN_FILENO,
-    );
-
-    term_info.lflag.ECHO = true;
-    term_info.lflag.ICANON = true;
-
-    try std.posix.tcsetattr(
-        std.posix.STDIN_FILENO,
-        .NOW,
-        term_info,
-    );
 }

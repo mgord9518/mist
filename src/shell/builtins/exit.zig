@@ -1,37 +1,29 @@
 const std = @import("std");
 const core = @import("../../main.zig");
+const curses = @import("../../shell/curses.zig");
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .function;
 
 pub const help = core.Help{
-    .description = "quit the shell session",
-    .usage = "{0s} [" ++
-        fg(.cyan) ++ "EXIT_CODE" ++
-        fg(.default) ++ "]",
+    .description = "quit the current shell session",
+    .usage = "[EXIT_CODE]",
 };
 
 // TODO: specify exit code
 pub fn main(arguments: []const core.Argument) core.Error {
-    _ = arguments;
+    curses.setTerminalMode(.normal) catch return .unknown_error;
 
-    setTerminalToNormalMode() catch return .unknown_error;
+    if (arguments.len == 0) std.posix.exit(0);
 
-    // TODO: use exit code
-    std.posix.exit(0);
-}
+    if (arguments.len != 1) return .usage_error;
+    if (arguments[0] == .option) return .usage_error;
 
-fn setTerminalToNormalMode() !void {
-    var term_info = try std.posix.tcgetattr(
-        std.posix.STDIN_FILENO,
-    );
+    const target = std.fmt.parseInt(
+        u8,
+        arguments[0].positional,
+        10,
+    ) catch 255;
 
-    term_info.lflag.ECHO = true;
-    term_info.lflag.ICANON = true;
-
-    try std.posix.tcsetattr(
-        std.posix.STDIN_FILENO,
-        .NOW,
-        term_info,
-    );
+    std.posix.exit(target);
 }

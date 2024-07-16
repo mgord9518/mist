@@ -6,8 +6,8 @@ const builtin = @import("builtin");
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "print an environment variable to stdout",
-    .usage = core.usage_print("<ENV_VAR>"),
+    .description = "print an environment variable to STDOUT",
+    .usage = "<ENV_VAR>",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
