@@ -21,7 +21,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     if (arguments.len < 1) return .usage_error;
     //if (arguments[0] == .option) return .usage_error;
 
-    const sys_args: ?[][]const u8 = null;
+    var sys_args: ?[][]const u8 = null;
 
     var negate = false;
 
@@ -48,7 +48,46 @@ pub fn main(arguments: []const core.Argument) core.Error {
         }
     }
 
-    const exit_status = shell.runLine(allocator, target.?);
+    const command_name = target orelse return .usage_error;
+    var command = shell.Command{ .system = .{
+        .name = command_name,
+    } };
+
+    // Convert to module command if it exists
+    if (core.module_list.get(command_name)) |_| {
+        command = .{ .module = .{
+            .name = command.system.name,
+            .arguments = args,
+        } };
+    } else {
+        sys_args = allocator.alloc(
+            []const u8,
+            args.len,
+        ) catch unreachable;
+
+        for (args, 0..) |_, idx| {
+            switch (args[idx]) {
+                .option => |opt| {
+                    sys_args.?[idx] = std.fmt.allocPrint(
+                        allocator,
+                        "-{c}",
+                        .{opt[1]},
+                    ) catch return .out_of_memory;
+                },
+                .positional => |str| {
+                    sys_args.?[idx] = str;
+                },
+            }
+        }
+
+        command.system.arguments = sys_args.?;
+    }
+
+    const exit_status = pipe.chainCommands(
+        allocator,
+        &.{command},
+    ) catch unreachable;
+    _ = &exit_status;
 
     if (negate) {
         std.debug.print("{}\n", .{exit_status});

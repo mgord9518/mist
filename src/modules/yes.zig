@@ -5,15 +5,15 @@ const fg = core.fg;
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "repeat [" ++ fg(.cyan) ++ "STRING" ++
-        fg(.default) ++ "], or `y` if unspecified",
-
-    .usage = "[" ++ fg(.cyan) ++ "STRING" ++
-        fg(.default) ++ "]",
+    .description = "repeat [STRING] or `y` if unspecified",
+    .usage = "[STRING]",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.io.getStdOut();
+    const stdout = stdout_file.writer();
+    var buf_writer = std.io.bufferedWriter(stdout);
+    const buffered_stdout = buf_writer.writer();
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
@@ -27,11 +27,13 @@ pub fn main(arguments: []const core.Argument) core.Error {
     }
 
     while (true) {
-        stdout.print(
+        buffered_stdout.print(
             "{s}\n",
             .{target orelse "y"},
         ) catch break;
     }
+
+    buf_writer.flush() catch unreachable;
 
     return .success;
 }

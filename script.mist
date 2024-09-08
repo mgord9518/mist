@@ -5,18 +5,47 @@
 # Notice: as comments are implemented as a no-op command, they must be followed
 # by a space. The only exception is the shebang (#!), which is hard-aliased to `#`
 
-set "my_quoted_var" "0123456789"
-set var normalText
+print $0
+
+# Test commands
+eql 1 1
+eql "" ""
+
+# TODO: finish HEREDOC
+# Procedures are (will be once implemented) simple
+# instruction lists that the shell will load when called
+#
+# To define a procedure, pipe the commands into `proc`
+# Which can be done conveniently using a HEREDOC, like so
+<< end | proc "my_procedure"
+    print "hi"
+    print "proc ended!"
+end
+
+my_procedure
+
+if eql 1 1 2		: false
+if eql 472bfkwpwbrw 0	: false
+if eql "" " "		: false
+
+eql $my_quoted_var $var
+
+print "0123456789"	| read "my_quoted_var"
+print normalText	| read var
+
+if eql $my_quoted_var $var	: false
 
 # The print command only supports using one argument, so all text that is
 # larger than a single word must be within quotes
 print "\$my_quoted_var $my_quoted_var $var"
-echo "$my_var"
+echo "${var}"
 
-INVALID COMMAND
+if INVALID_COMMAND : false
 
 # TODO: not sure about this if syntax, it was very easy to implement though
-if true : print "TRUE"
+if true  : print "TRUE"
 if false : print "FALSE"
 
 ls -l
+
+exit 0

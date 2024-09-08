@@ -1,5 +1,5 @@
 const std = @import("std");
-const core = @import("../../main.zig");
+const core = @import("../main.zig");
 
 pub const exec_mode: core.ExecMode = .fork;
 pub const no_display = true;

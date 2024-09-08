@@ -1,5 +1,6 @@
 const std = @import("std");
 const core = @import("../main.zig");
+const sort = @import("sort.zig");
 const fg = core.fg;
 const curses = @import("../shell/curses.zig");
 const S = std.posix.S;
@@ -39,15 +40,15 @@ pub fn main(arguments: []const core.Argument) core.Error {
     var long = false;
     var single_column = false;
     var show_hidden = false;
-    var sort = true;
+    var do_sort = true;
     var rev_sort = false;
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) switch (arg.option.flag) {
+        if (arg == .option) switch (arg.option[1]) {
             'a' => show_hidden = true,
             'l' => long = true,
-            'U' => sort = false,
+            'U' => do_sort = false,
             'r' => rev_sort = true,
             '1' => single_column = true,
 
@@ -123,7 +124,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         }) catch return .unknown_error;
     }
 
-    if (sort) {
+    if (do_sort) {
         std.mem.sort(
             Entry,
             file_list.items,
@@ -148,8 +149,6 @@ pub fn main(arguments: []const core.Argument) core.Error {
     var idx: usize = 0;
     var col: usize = 0;
 
-    var st_buf: [1]u8 = undefined;
-
     if (stdout_file.isTty()) {
         for (file_list.items) |entry| {
             if (idx >= files_per_col) {
@@ -166,39 +165,37 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     mode = stat.mode;
                 }
 
-                stat_blk: {
-                    const stat = dir.statFile(entry.path) catch break :stat_blk;
-                    //_ = stat;
-                    mode = stat.mode;
+                if (false) {
+                    stat_blk: {
+                        const stat = dir.statFile(entry.path) catch break :stat_blk;
+                        //_ = stat;
+                        mode = stat.mode;
+                    }
                 }
 
-                st_buf[0] = if (S.ISREG(mode)) blk: {
-                    break :blk '-';
-                } else if (S.ISDIR(mode)) blk: {
-                    break :blk 'd';
-                } else if (S.ISCHR(mode)) blk: {
-                    break :blk 'c';
-                } else if (S.ISBLK(mode)) blk: {
-                    break :blk 'b';
-                } else if (S.ISFIFO(mode)) blk: {
-                    break :blk 'p';
-                } else if (S.ISFIFO(mode)) blk: {
-                    break :blk 'p';
-                } else if (S.ISLNK(mode)) blk: {
-                    break :blk 'l';
-                } else if (S.ISSOCK(mode)) blk: {
-                    break :blk 's';
-                } else '!';
+                const symbol: u8 = switch (entry.kind) {
+                    .file => '-',
+                    .directory => 'd',
+                    .character_device => 'c',
+                    .block_device => 'b',
+                    .named_pipe => 'p',
+                    .sym_link => 'l',
+                    .unix_domain_socket => 's',
+                    else => '?',
+                };
 
                 const sz = if (entry.stat) |stat| blk: {
                     break :blk stat.size;
                 } else 0;
 
-                stdout.print(fg(.default) ++ "{s} {o:0<3} {:>8.2} ", .{
-                    st_buf[0..1],
-                    mode & 0o777,
-                    fmtIntSizeDec(sz),
-                }) catch return .unknown_error;
+                stdout.print(
+                    fg(.default) ++ "{c} {o:0>4} {:>8.2} ",
+                    .{
+                        symbol,
+                        mode & 0o7777,
+                        fmtIntSizeDec(sz),
+                    },
+                ) catch return .write_failure;
             }
 
             curses.move(.right, col * col_width);
@@ -206,20 +203,20 @@ pub fn main(arguments: []const core.Argument) core.Error {
             stdout.print("{s}{s}\n", .{
                 entry.color,
                 entry.path,
-            }) catch return .unknown_error;
+            }) catch return .write_failure;
 
             idx += 1;
         }
 
         while (idx < files_per_col) : (idx += 1) {
-            _ = stdout.write("\n") catch return .unknown_error;
+            _ = stdout.write("\n") catch return .write_failure;
         }
 
-        _ = stdout.write(fg(.default)) catch return .unknown_error;
+        _ = stdout.write(fg(.default)) catch return .write_failure;
     } else {
         idx += 1;
         for (file_list.items) |entry| {
-            stdout.print("{s}\n", .{entry.path}) catch return .unknown_error;
+            stdout.print("{s}\n", .{entry.path}) catch return .write_failure;
         }
     }
 
@@ -238,75 +235,19 @@ const SortContext = struct {
 
 fn sortFn(ctx: SortContext, a: Entry, b: Entry) bool {
     const ret = switch (ctx.order) {
-        .alphabetic => sortByAlphabet({}, a, b),
-        //.alphabetic => sortByAlphabetBytes({}, a, b),
-        .size => sortBySize({}, a, b),
+        .alphabetic => sort.sortByAlphabet({}, a.path, b.path),
+        //.alphabetic => sortByAlphabetBytes({}, a.path, b.path),
+        .size => blk: {
+            const sz_a = if (a.stat != null) a.stat.?.size else 0;
+            const sz_b = if (b.stat != null) b.stat.?.size else 0;
+
+            break :blk sz_a > sz_b;
+        },
     };
 
     if (ctx.reverse) return !ret;
 
     return ret;
-}
-
-fn sortBySize(_: void, a: Entry, b: Entry) bool {
-    const sz_a = if (a.stat != null) a.stat.?.size else 0;
-    const sz_b = if (b.stat != null) b.stat.?.size else 0;
-
-    return sz_a > sz_b;
-}
-
-/// Sorts UTF-8 strings ordered by lower to higher codepoints preferring
-/// shorter strings.
-fn sortByAlphabet(_: void, a: Entry, b: Entry) bool {
-    var utf8_view_a = std.unicode.Utf8View.init(
-        a.path,
-    ) catch return true;
-
-    var utf8_view_b = std.unicode.Utf8View.init(
-        b.path,
-    ) catch return false;
-
-    var it_a = utf8_view_a.iterator();
-    var it_b = utf8_view_b.iterator();
-
-    while (true) {
-        const codepoint_a = it_a.nextCodepoint() orelse return true;
-        const codepoint_b = it_b.nextCodepoint() orelse return false;
-
-        if (codepoint_a > codepoint_b) {
-            return false;
-        } else if (codepoint_a < codepoint_b) {
-            return true;
-        }
-    }
-
-    unreachable;
-}
-
-/// Sorts strings by byte values. This is smaller and simpler than the UTF-8
-/// version but will not properly sort Unicode strings
-fn sortByAlphabetBytes(_: void, a: Entry, b: Entry) bool {
-    var a_idx: usize = 0;
-    var b_idx: usize = 0;
-
-    while (true) {
-        const char_a = a.path[a_idx];
-        const char_b = b.path[b_idx];
-
-        if (char_a > char_b) {
-            return false;
-        } else if (char_a < char_b) {
-            return true;
-        }
-
-        a_idx += 1;
-        b_idx += 1;
-
-        if (a_idx >= a.path.len) return true;
-        if (b_idx >= b.path.len) return false;
-    }
-
-    unreachable;
 }
 
 const formatSizeDec = formatSizeImpl(1000).formatSizeImpl;

@@ -21,7 +21,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     for (arguments) |arg| {
         if (arg == .positional) return .usage_error;
 
-        if (arg == .option) switch (arg.option.flag) {
+        if (arg == .option) switch (arg.option[1]) {
             'd' => decode = true,
 
             else => return .usage_error,

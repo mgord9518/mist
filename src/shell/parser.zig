@@ -3,17 +3,6 @@ const shell = @import("../shell.zig");
 
 const Command = shell.Command;
 
-// var_exists
-// Int:23
-//
-// String hello "hello world"
-//
-// List a
-//   23
-//   hjjk
-//   true
-// ;
-
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
@@ -23,13 +12,11 @@ pub fn main() !void {
 
     while (try it.next()) |word| {
         switch (word) {
-            //.string => |string| std.debug.print("string: {s}\n", .{string}),
             .command => |command| std.debug.print("command: {s} {?s}\n", .{
                 command.system.name,
                 command.system.arguments,
             }),
             .separator => |separator| std.debug.print("sep   : {s}\n", .{@tagName(separator)}),
-            //else => unreachable,
         }
     }
 }
@@ -86,29 +73,23 @@ pub const SyntaxIterator = struct {
         it.args.deinit();
     }
 
-    /// High-level parser, returns commands, variables, etc
     pub fn next(it: *SyntaxIterator) !?Word {
         var command: ?Command = null;
 
         const args_off = it.args.items.len;
-
-        //it.args.shrinkAndFree(0);
 
         if (it.return_next) |word| {
             it.return_next = null;
             return word;
         }
 
-        //const token = it.nextToken() orelse return null;
-        while (it.nextToken()) |token| {
+        while (try it.nextToken()) |token| {
             switch (token) {
                 .string => |string| {
                     if (command == null) {
                         command = .{
                             .system = .{ .name = string },
                         };
-
-                        // return .{ .command = command.? };
                     } else {
                         try it.args.append(string);
                         command.?.system.arguments = it.args.items[args_off..];
@@ -121,8 +102,6 @@ pub const SyntaxIterator = struct {
                     if (command != null) {
                         return .{ .command = command.? };
                     }
-
-                    //  return .{ .separator = sep };
                 },
             }
         }
@@ -131,10 +110,8 @@ pub const SyntaxIterator = struct {
         return .{ .command = command.? };
     }
 
-    /// Breaks an input string into low-level tokens (strings and separators)
-    /// These should be iterated over to create commands, variables, etc
     /// All strings must be freed by the caller
-    pub fn nextToken(it: *SyntaxIterator) ?Token {
+    pub fn nextToken(it: *SyntaxIterator) !?Token {
         const has_whitespace = it.advanceToNextWord();
         if (has_whitespace) {
             return .{ .separator = .whitespace };
@@ -145,17 +122,13 @@ pub const SyntaxIterator = struct {
         defer var_buf.deinit();
 
         var backslash_escape = false;
-        var in_variable = false;
         var var_state: enum {
             none,
             // $var
             normal,
             // ${var}
             bracket,
-            // $var:Int
-            //typed,
         } = .none;
-        _ = &in_variable;
 
         var word_pos: usize = 0;
 
@@ -192,6 +165,18 @@ pub const SyntaxIterator = struct {
                         it.in_quotes = !it.in_quotes;
                     }
                 },
+                '~' => {
+                    if (it.in_quotes) {
+                        should_add = true;
+                    } else if (backslash_escape) {
+                        should_add = true;
+                        backslash_escape = false;
+                    } else {
+                        tok_buf.appendSlice(
+                            std.posix.getenv("HOME") orelse "",
+                        ) catch unreachable;
+                    }
+                },
                 '$' => {
                     if (backslash_escape) {
                         should_add = true;
@@ -204,12 +189,14 @@ pub const SyntaxIterator = struct {
                     switch (var_state) {
                         .normal => var_state = .bracket,
                         // TODO error
-                        .bracket, .none => unreachable,
+                        .bracket => unreachable,
+                        .none => should_add = true,
                     }
                 },
                 '}' => {
                     switch (var_state) {
-                        .normal, .none => unreachable,
+                        .normal => unreachable,
+                        .none => should_add = true,
                         // TODO error
                         .bracket => var_state = .none,
                     }
@@ -250,23 +237,25 @@ pub const SyntaxIterator = struct {
                 }
             }
 
+            // Return the current word if a pipe, etc is encountered
             if (it.special_chars[byte] and !it.in_quotes) {
                 defer it.pos += word_pos;
                 return .{ .string = tok_buf.toOwnedSlice() catch unreachable };
             }
 
-            // Return the current word if a pipe, etc is encountered
-
             word_pos += 1;
 
             // Return the current word if at the end of the string
             if (it.pos + word_pos >= it.slice.len) {
-                if (var_state != .none) {
-                    _ = dumpVariableString(var_buf.items, tok_buf.writer());
-                    var_buf.shrinkAndFree(0);
+                switch (var_state) {
+                    .bracket => return error.ExpectedBracket,
+                    .normal => {
+                        _ = dumpVariableString(var_buf.items, tok_buf.writer());
+                        var_buf.shrinkAndFree(0);
+                    },
+                    else => {},
                 }
 
-                //std.debug.print("  Q {d} {} {}\n", .{ word_len, backslash_escape, should_add });
                 defer it.pos += word_pos;
                 return .{ .string = tok_buf.toOwnedSlice() catch unreachable };
             }
@@ -285,75 +274,11 @@ pub const SyntaxIterator = struct {
         return true;
     }
 
-    pub fn nextTokenOld(it: *SyntaxIterator) ?Token {
-        const has_whitespace = it.advanceToNextWord();
-        if (has_whitespace) {
-            return .{ .separator = .whitespace };
-        }
-
-        var tok_buf = it.allocator.alloc(u8, 4096) catch unreachable;
-
-        var word_len: usize = 0;
-
-        for (it.slice[it.pos..]) |byte| {
-            var skip: usize = 0;
-
-            if (byte == '|' and word_len == 0 and it.state != .in_quotes) {
-                it.pos += 1;
-                return .{ .separator = .pipe };
-            }
-
-            if (byte == '\\') {
-                if (it.backslash_escape) {
-                    it.backslash_escape = false;
-                } else {
-                    it.backslash_escape = true;
-                    skip += 1;
-                }
-            }
-
-            if (byte == '"') {
-                if (it.state == .in_quotes) {
-                    it.state = .none;
-                    skip += 1;
-                } else {
-                    it.state = .in_quotes;
-                    defer it.pos += word_len + skip + 1;
-
-                    if (word_len > 0) {
-                        //return .{ .string = it.slice[it.pos..][0..word_len] };
-                        return .{ .string = tok_buf[0..word_len] };
-                    } else continue;
-                }
-            }
-
-            tok_buf[word_len] = byte;
-
-            if (it.special_chars[byte] and it.state != .in_quotes) {
-                defer it.pos += word_len + skip;
-                //return .{ .string = it.slice[it.pos..][0..word_len] };
-                return .{ .string = tok_buf[0..word_len] };
-            } else if (it.pos + word_len + 1 >= it.slice.len) {
-                defer it.pos += word_len + 1;
-                //return .{ .string = it.slice[it.pos..][0 .. word_len + 1] };
-                return .{ .string = tok_buf[0 .. word_len + 1] };
-            }
-
-            word_len += 1;
-
-            std.debug.print("  {s}\n", .{tok_buf[0..word_len]});
-        }
-
-        return null;
-    }
-
     // Returns true if any whitespace was skipped
     fn advanceToNextWord(it: *SyntaxIterator) bool {
         const start_pos = it.pos;
 
         for (it.slice[it.pos..]) |byte| {
-            //if (byte != ' ' or it.state == .in_quotes) return start_pos != it.pos;
-            //std.debug.print("SKIP {c}\n", .{byte});
             if (byte != ' ') return start_pos != it.pos;
             it.pos += 1;
         }

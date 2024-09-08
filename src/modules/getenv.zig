@@ -18,11 +18,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) switch (arg.option.flag) {
-            //'a' => show_hidden = true,
-
-            else => return .usage_error,
-        };
+        if (arg == .option) return .usage_error;
 
         if (arg == .positional) {
             target = arg.positional;

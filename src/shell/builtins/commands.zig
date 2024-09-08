@@ -17,11 +17,16 @@ pub fn main(_: []const core.Argument) core.Error {
 
         if (mod.no_display) continue;
 
-        stdout.print(core.colors.module ++ "{s:>8}" ++
-            fg(.default) ++ ": {s}\n", .{
+        //stdout.print(core.colors.module ++ "{s:>8}" ++
+        stdout.print(core.colors.module ++ "{s}" ++
+            fg(.default) ++ ": \n  ", .{
             k,
-            mod.help.?.description,
+            //mod.help.?.description,
         }) catch {};
+
+        core.usagePrint(stdout, mod.help.?.description) catch {};
+
+        stdout.print("\n\n", .{}) catch {};
     }
 
     return .success;

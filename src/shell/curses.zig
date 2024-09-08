@@ -43,6 +43,18 @@ pub fn toLineEnd() void {
     move(.right, 999);
 }
 
+pub fn insert(text: []const u8) void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (text.len == 0) return;
+
+    if (text.len == 1) {
+        stdout.print("\x1b[@{s}", .{text}) catch {};
+    } else {
+        stdout.print("\x1b[{d}@{s}", .{ text.len, text }) catch {};
+    }
+}
+
 pub fn backspace() void {
     const stdout = std.io.getStdOut().writer();
 

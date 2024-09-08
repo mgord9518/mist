@@ -20,8 +20,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     if (name.len > 255) return .no_space_left;
 
-    // `V` for variable
-    _ = std.posix.write(4, "V") catch unreachable;
+    // `P` for procedure
+    _ = std.posix.write(4, "P") catch unreachable;
 
     _ = std.posix.write(
         4,

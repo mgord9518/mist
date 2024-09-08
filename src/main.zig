@@ -26,23 +26,28 @@ pub const Error = enum(u7) {
     usage_error = 2,
 
     // Filesystem
-    file_not_found = 16,
-    access_denied = 17,
-    cwd_not_found = 18,
+    file_not_found,
+    access_denied,
+    cwd_not_found,
+
+    // IO
+    read_failure,
+    write_failure,
 
     // Variables
-    invalid_variable = 64,
-    invalid_env_variable = 65,
+    invalid_variable,
+    invalid_env_variable,
 
     // Memory
-    out_of_memory = 80,
-    no_space_left = 81,
+    out_of_memory,
+    no_space_left,
+    not_equal,
 
     // Encoding/ compression
-    corrupt_input = 96,
+    corrupt_input,
 
     // Misc
-    false = 112,
+    false,
 
     // Exec
     command_cannot_execute = 126,
@@ -92,18 +97,11 @@ pub const Help = struct {
     };
 };
 
-pub const Option = struct {
-    flag: u8,
-    arg: ?[]const u8 = null,
-    payload: ?union(enum) {
-        positional: []const u8,
-        many_positionals: [][]const u8,
-    } = null,
-};
-
 pub const Argument = union(enum) {
     positional: []const u8,
-    option: Option,
+
+    // Done this way to make converting between []Argument and [][]u8 cheap
+    option: *const [2]u8,
 };
 
 pub fn main() !void {
@@ -123,7 +121,7 @@ pub fn main() !void {
 
     var it = ArgumentParser.init(args.items);
     while (it.next()) |entry| {
-        if (entry == .option and entry.option.flag == 'h') {
+        if (entry == .option and entry.option[1] == 'h') {
             print_help = true;
         }
 
@@ -169,6 +167,14 @@ pub const ArgumentParser = struct {
         if (it.current_arg == it.arguments.len) return null;
 
         const arg = it.arguments[it.current_arg];
+
+        if (arg.len == 0) {
+            it.current_arg += 1;
+            return .{
+                .positional = "",
+            };
+        }
+
         // Send as positional arg
         if (arg[0] != '-' or it.state == .flags_ended) {
             it.current_arg += 1;
@@ -199,9 +205,7 @@ pub const ArgumentParser = struct {
 
                 defer it.idx += 1;
                 return .{
-                    .option = .{
-                        .flag = it.arguments[it.current_arg][it.idx + 1],
-                    },
+                    .option = it.arguments[it.current_arg][it.idx..][0..2],
                 };
             },
         }

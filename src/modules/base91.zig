@@ -1,6 +1,5 @@
 const std = @import("std");
 const core = @import("../main.zig");
-const fg = core.fg;
 const base91 = @import("base91");
 
 pub const exec_mode: core.ExecMode = .fork;
@@ -14,7 +13,8 @@ pub const help = core.Help{
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
@@ -28,7 +28,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     var decode = false;
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) switch (arg.option.flag) {
+        if (arg == .option) switch (arg.option[1]) {
             'd' => decode = true,
 
             else => return .usage_error,
@@ -41,19 +41,17 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     const mem = 4096;
 
-    if (decode) {
-        const buf = allocator.alloc(
-            u8,
-            mem,
-        ) catch return .unknown_error;
-        defer allocator.free(buf);
+    const buf = allocator.alloc(
+        u8,
+        base91.standard.Encoder.calcSize(mem),
+    ) catch return .unknown_error;
+    defer allocator.free(buf);
 
+    if (decode) {
         var decoder = base91.decodeStream(
             allocator,
             buffered_stdin,
-            .{
-                .buf_size = base91.standard.Decoder.calcSize(mem),
-            },
+            .{},
         ) catch return .unknown_error;
 
         while (true) {
@@ -64,18 +62,10 @@ pub fn main(arguments: []const core.Argument) core.Error {
             _ = buffered_stdout.write(buf[0..bytes_read]) catch return .unknown_error;
         }
     } else {
-        const buf = allocator.alloc(
-            u8,
-            base91.standard.Encoder.calcSize(mem),
-        ) catch return .out_of_memory;
-        defer allocator.free(buf);
-
         var encoder = base91.encodeStream(
             allocator,
             buffered_stdin,
-            .{
-                .buf_size = mem,
-            },
+            .{},
         ) catch return .unknown_error;
 
         while (true) {

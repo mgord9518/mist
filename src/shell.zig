@@ -24,7 +24,7 @@ pub const help = core.Help{
 };
 
 pub var variables: VariableMap = undefined;
-pub var aliases: std.StringHashMap(Command) = undefined;
+pub var procedures: VariableMap = undefined;
 pub var history: History = undefined;
 
 pub const Command = union(enum) {
@@ -32,15 +32,105 @@ pub const Command = union(enum) {
     /// `src/modules` directory
     module: struct {
         name: []const u8,
-        arguments: []const core.Argument,
+        arguments: []const core.Argument = &.{},
     },
 
     /// System command; anything that falls under `$PATH`
     system: struct {
         name: []const u8,
-        arguments: ?[]const []const u8 = null,
+        arguments: []const []const u8 = &.{},
     },
 };
+
+// Re-allocs a command and converts it to a module if needed
+pub fn processCommand(allocator: std.mem.Allocator, command: Command) !Command {
+    // Convert to module command if it exists
+    if (core.module_list.get(command.system.name)) |_| {
+        // TODO free
+        var mod_args = std.ArrayList(core.Argument).init(allocator);
+
+        var mod_it = core.ArgumentParser.init(command.system.arguments);
+
+        while (mod_it.next()) |arg| {
+            try mod_args.append(arg);
+        }
+
+        return .{
+            .module = .{
+                .name = command.system.name,
+                .arguments = mod_args.items,
+            },
+        };
+    }
+
+    if (command == .system) {
+        var mod_args = std.ArrayList([]const u8).init(allocator);
+
+        for (command.system.arguments) |arg| {
+            try mod_args.append(arg);
+        }
+
+        return Command{
+            .system = .{
+                .name = command.system.name,
+                .arguments = mod_args.items,
+            },
+        };
+    }
+
+    unreachable;
+}
+
+pub fn runLine(
+    allocator: std.mem.Allocator,
+    line: []const u8,
+    interactive: bool,
+) !pipe.ChainRet {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    const arena_allocator = arena.allocator();
+    defer arena.deinit();
+
+    var pipe_line = std.ArrayList(
+        Command,
+    ).init(arena_allocator);
+    defer pipe_line.deinit();
+
+    var it = try parser.SyntaxIterator.init(
+        arena_allocator,
+        line,
+    );
+    defer it.deinit();
+
+    // Parse the line text
+    // Memory is freed between `next` calls, so commands must be copied
+    // before being piped together
+    while (try it.next()) |entry| {
+        if (entry != .command) continue;
+
+        const command = try processCommand(
+            arena_allocator,
+            entry.command,
+        );
+
+        try pipe_line.append(command);
+    }
+
+    const exit_status = try pipe.chainCommands(
+        arena_allocator,
+        pipe_line.items,
+    );
+
+    if (interactive and exit_status.ret == .module_exit_failure) {
+        const mod_name = pipe_line.items[exit_status.idx].module.name;
+
+        if (exit_status.ret.module_exit_failure == .usage_error) {
+            const mod = core.module_list.get(mod_name) orelse unreachable;
+            core.printHelp(mod_name, mod.help) catch {};
+        }
+    }
+
+    return exit_status;
+}
 
 pub fn nonInteractiveLoop(script_path: []const u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -59,10 +149,6 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
 
     var reader = file.reader();
     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| : (line_num += 1) {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        const arena_allocator = arena.allocator();
-        defer arena.deinit();
-
         var code_buf: [3]u8 = undefined;
 
         variables.put(
@@ -75,92 +161,49 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
         ) catch {};
 
         if (previous_status_name) |name| {
-            variables.put("mist.exit_code_name", name) catch {};
+            variables.put("mist.status.name", name) catch {};
         } else {
-            _ = variables.remove("mist.exit_code_name");
+            _ = variables.remove("mist.status.name");
         }
 
-        var pipe_line = std.ArrayList(
-            Command,
-        ).init(allocator);
-        defer pipe_line.deinit();
-
-        var it = try parser.SyntaxIterator.init(
-            //allocator,
-            arena_allocator,
-            line,
-        );
-
-        var print_help: ?core.Help = null;
-        var print_help_name: []const u8 = &.{};
-
-        // Parse the line text
-        while (try it.next()) |entry| {
-            if (entry != .command) continue;
-
-            const command = aliases.get(
-                entry.command.system.name,
-            ) orelse entry.command;
-
-            var added = false;
-
-            // Convert to module command if it exists
-            if (core.module_list.get(command.system.name)) |mod| {
-                // TODO free
-                var mod_args = std.ArrayList(core.Argument).init(allocator);
-
-                if (command.system.arguments != null) {
-                    var mod_it = core.ArgumentParser.init(command.system.arguments.?);
-
-                    while (mod_it.next()) |arg| {
-                        try mod_args.append(arg);
-
-                        if (arg == .option and arg.option.flag == 'h') {
-                            print_help = mod.help;
-                            print_help_name = command.system.name;
-                        }
-                    }
-                }
-
-                try pipe_line.append(.{
-                    .module = .{
-                        .name = command.system.name,
-                        .arguments = mod_args.items,
-                    },
-                });
-
-                added = true;
-            }
-
-            if (added) continue;
-            try pipe_line.append(command);
-        }
-
-        if (pipe_line.items.len == 0) continue;
-
-        const exit_status = pipe.chainCommands(
+        const exit_status = runLine(
             allocator,
-            pipe_line.items,
+            line,
+            false,
         ) catch unreachable;
 
-        previous_status_name = statusName(
-            exit_status.ret,
-        );
+        previous_status_name = statusName(exit_status.ret);
+        previous_status = statusCode(exit_status.ret);
 
-        previous_status = statusCode(
-            exit_status.ret,
-        );
+        const command_name = "FIXME";
 
         if (previous_status_name) |err_name| {
-            printError("{s}\n", line_num, .{err_name});
+            printError(
+                "{s} {s}\n",
+                line_num,
+                exit_status.idx,
+                .{ command_name, err_name },
+            );
+        } else if (previous_status != 0) {
+            printError(
+                "{s} exit code: {d}\n",
+                line_num,
+                exit_status.idx,
+                .{ command_name, previous_status },
+            );
         }
     }
 }
 
-pub fn printError(comptime fmt: []const u8, line_num: usize, args: anytype) void {
+pub fn printError(
+    comptime fmt: []const u8,
+    line_num: usize,
+    sep_idx: usize,
+    args: anytype,
+) void {
     std.debug.print(
-        fg(.red) ++ "error at line {d} :: " ++ fg(.default),
-        .{line_num},
+        fg(.red) ++ "{d:>3} | {d} :: " ++ fg(.default),
+        .{ line_num, sep_idx },
     );
 
     std.debug.print(
@@ -194,19 +237,20 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     variables.put("mist.exit_code", "0") catch {};
 
+    procedures = VariableMap.init(allocator);
+    defer procedures.deinit();
+
     if (target) |script_path| {
+        variables.put(
+            "0",
+            script_path,
+        ) catch {};
+
         nonInteractiveLoop(script_path) catch unreachable;
         return .success;
     }
 
     core.usagePrint(stdout, greeting) catch unreachable;
-
-    aliases = std.StringHashMap(Command).init(allocator);
-    defer aliases.deinit();
-    aliases.put(
-        "bruh",
-        .{ .system = .{ .name = "echo" } },
-    ) catch {};
 
     core.disableSig(.interrupt) catch unreachable;
     core.disableSig(.quit) catch unreachable;
@@ -224,14 +268,10 @@ pub fn main(arguments: []const core.Argument) core.Error {
     while (true) {
         curses.setTerminalMode(.raw) catch return .unknown_error;
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        const arena_allocator = arena.allocator();
-        defer arena.deinit();
-
         var buf: [3]u8 = undefined;
 
         variables.put(
-            "mist.exit_code",
+            "mist.status",
             std.fmt.bufPrint(
                 &buf,
                 "{d}",
@@ -240,29 +280,21 @@ pub fn main(arguments: []const core.Argument) core.Error {
         ) catch {};
 
         if (previous_status_name) |name| {
-            variables.put("mist.exit_code_name", name) catch {};
+            variables.put("mist.status.name", name) catch {};
         } else {
-            _ = variables.remove("mist.exit_code_name");
+            _ = variables.remove("mist.status.name");
         }
 
         // How many entries to travel up the history
         var history_cursor: usize = 0;
 
-        var pipe_line = std.ArrayList(
-            Command,
-        ).init(allocator);
-        defer pipe_line.deinit();
-
         if (print_prompt) {
             _ = modules.prompt.main(&.{});
+            curses.savePosition();
         }
 
         var line = std.ArrayList(u8).init(allocator);
         defer line.deinit();
-
-        // Use Unicode codepoints instead of UTF-8 due to easier indexing
-        var line_text = std.ArrayList(u21).init(allocator);
-        defer line_text.deinit();
 
         var cursor_pos: usize = 0;
         var vcursor_pos: usize = 0;
@@ -327,7 +359,14 @@ pub fn main(arguments: []const core.Argument) core.Error {
                 }
             }
 
-            if (char == '\t') print_handled = true;
+            if (char == '\t') {
+                print_handled = true;
+                autoFinishLine(
+                    allocator,
+                    line.items,
+                    cursor_pos,
+                ) catch unreachable;
+            }
 
             // ANSI control
             if (char == '\x1b') {
@@ -345,8 +384,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
                         line.shrinkAndFree(0);
                         line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
 
-                        curses.move(.left, vcursor_pos);
-                        stdout.print("\x1b[0K", .{}) catch return .unknown_error;
+                        curses.restorePosition();
+                        curses.clearLine(.right);
 
                         stdout.print("{s}", .{line.items}) catch return .unknown_error;
 
@@ -365,7 +404,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                             line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
                         }
 
-                        curses.move(.left, cursor_pos);
+                        curses.restorePosition();
                         curses.clearLine(.right);
 
                         stdout.print("{s}", .{line.items}) catch return .unknown_error;
@@ -375,7 +414,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     },
                     'C' => {
                         if (cursor_pos < line.items.len) {
-                            const remaining = utf8ContinueLen(line.items[cursor_pos]);
+                            const remaining: u3 = utf8ContinueLen(line.items[cursor_pos]);
 
                             curses.move(.right, 1);
                             cursor_pos += 1 + remaining;
@@ -412,120 +451,90 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     utf8_buf[idx] = getChar();
                 }
 
-                var idx: usize = 0;
+                const codepoint = utf8_buf[0 .. continue_len + 1];
 
-                while (idx <= continue_len) : (idx += 1) {
-                    _ = line.insert(cursor_pos + idx, utf8_buf[idx]) catch return .unknown_error;
+                for (codepoint, 0..) |byte, idx| {
+                    _ = line.insert(
+                        cursor_pos + idx,
+                        byte,
+                    ) catch return .unknown_error;
                 }
 
-                curses.savePosition();
-                // Print updated line
-                stdout.print("{s}", .{line.items[cursor_pos..]}) catch return .unknown_error;
+                curses.insert(codepoint);
 
                 cursor_pos += continue_len + 1;
                 vcursor_pos += 1;
-
-                // Return to cursor position
-                curses.restorePosition();
-                curses.move(.right, 1);
             }
         }
 
         if (restart) continue;
 
-        var it = parser.SyntaxIterator.init(
-            arena_allocator,
-            line.items,
-        ) catch return .unknown_error;
-        defer it.deinit();
-
-        var print_help: ?core.Help = null;
-        var print_help_name: []const u8 = &.{};
-
-        // Parse the line text
-        while (it.next() catch return .unknown_error) |entry| {
-            if (entry != .command) continue;
-
-            const command = aliases.get(
-                entry.command.system.name,
-            ) orelse entry.command;
-
-            var added = false;
-            // Convert to module command if it exists
-            if (core.module_list.get(command.system.name)) |mod| {
-                // TODO free
-                var mod_args = std.ArrayList(core.Argument).init(allocator);
-
-                if (command.system.arguments != null) {
-                    var mod_it = core.ArgumentParser.init(command.system.arguments.?);
-
-                    while (mod_it.next()) |arg| {
-                        mod_args.append(arg) catch unreachable;
-
-                        if (arg == .option and arg.option.flag == 'h') {
-                            print_help = mod.help;
-                            print_help_name = command.system.name;
-                        }
-                    }
-                }
-
-                pipe_line.append(.{
-                    .module = .{
-                        .name = command.system.name,
-                        .arguments = mod_args.items,
-                    },
-                }) catch unreachable;
-
-                added = true;
-            }
-
-            if (added) continue;
-
-            pipe_line.append(command) catch return .unknown_error;
-        }
-
-        if (print_help) |h| {
-            core.printHelp(print_help_name, h) catch return .unknown_error;
-            previous_status = 0;
-            continue;
-        }
-
-        if (pipe_line.items.len == 0) continue;
-
         curses.setTerminalMode(.normal) catch return .unknown_error;
 
-        previous_status = 0;
-        previous_status_name = null;
-
-        const exit_status = pipe.chainCommands(
+        const exit_status = runLine(
             allocator,
-            pipe_line.items,
+            line.items,
+            true,
         ) catch unreachable;
 
-        previous_status_name = statusName(
-            exit_status.ret,
-        );
+        variables.put(
+            "mist.status.index",
+            std.fmt.bufPrint(
+                &buf,
+                "{d}",
+                .{exit_status.idx},
+            ) catch unreachable,
+        ) catch {};
 
-        previous_status = statusCode(
-            exit_status.ret,
-        );
-
-        if (exit_status.ret == .module_exit_failure) {
-            const mod_name = pipe_line.items[exit_status.idx].module.name;
-
-            if (exit_status.ret.module_exit_failure == .usage_error) {
-                const mod = core.module_list.get(mod_name) orelse unreachable;
-                core.printHelp(mod_name, mod.help) catch {};
-            }
-        }
-
-        //if (exit_status.ret == .status and pipe_line.items[exit_status.idx] == .module) {
-
-        //}
+        previous_status_name = statusName(exit_status.ret);
+        previous_status = statusCode(exit_status.ret);
     }
 }
 
-fn statusCode(
+fn autoFinishLine(
+    allocator: std.mem.Allocator,
+    line: []const u8,
+    cursor_pos: usize,
+) !void {
+    const cwd = std.fs.cwd();
+    var dir = try cwd.openDir(".", .{ .iterate = true });
+
+    var it = try parser.SyntaxIterator.init(
+        allocator,
+        line,
+    );
+    defer it.deinit();
+
+    var token_start: usize = 0;
+    while (try it.nextToken()) |token| {
+        if (token != .string) {
+            token_start = it.pos;
+            continue;
+        }
+
+        if (cursor_pos < token_start) continue;
+        if (cursor_pos > it.pos) continue;
+
+        const word = token.string;
+
+        var dir_it = dir.iterate();
+        while (try dir_it.next()) |entry| {
+            if (entry.name.len < word.len) continue;
+
+            if (std.mem.eql(u8, entry.name[0..word.len], word)) {
+                std.debug.print("\nls {s}", .{
+                    entry.name,
+                });
+            }
+        }
+
+        allocator.free(word);
+
+        token_start = it.pos;
+    }
+}
+
+pub fn statusCode(
     exec_status: pipe.ChainRet.Return,
 ) u8 {
     return switch (exec_status) {
@@ -537,7 +546,7 @@ fn statusCode(
     };
 }
 
-fn statusName(
+pub fn statusName(
     exec_status: pipe.ChainRet.Return,
 ) ?[]const u8 {
     return switch (exec_status) {

@@ -104,7 +104,7 @@ pub fn main(_: []const core.Argument) core.Error {
 
     var code_buf: [4096]u8 = undefined;
 
-    const previous_name = shell.variables.get("mist.exit_code_name");
+    const previous_name = shell.variables.get("mist.status.name");
 
     const str: []const u8 = if (previous_name) |name| blk: {
         if (false) {
@@ -117,8 +117,11 @@ pub fn main(_: []const core.Argument) core.Error {
 
         break :blk std.fmt.bufPrint(
             &code_buf,
-            fg(.red) ++ "{s}",
-            .{name},
+            fg(.red) ++ "{?s} : {s}",
+            .{
+                shell.variables.get("mist.status.index"),
+                name,
+            },
         ) catch unreachable;
     } else if (std.mem.eql(u8, "0", exit_code)) blk: {
         break :blk comptime fg(.green) ++ "ok";

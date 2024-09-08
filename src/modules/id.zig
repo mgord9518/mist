@@ -41,7 +41,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
             continue;
         }
 
-        switch (arg.option.flag) {
+        switch (arg.option[0]) {
             'u' => id_type = .uid,
             'g' => id_type = .gid,
             'G' => id_type = .gids,

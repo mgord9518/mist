@@ -20,7 +20,7 @@ pub const ChainRet = struct {
     // This should only be read if `exit_code` > 0
     idx: usize,
 
-    pub const Status = packed struct {
+    pub const Status = packed struct(u16) {
         signal: core.Signal,
         _7: u1 = undefined,
         core_dump: bool = false,
@@ -50,19 +50,44 @@ pub const ChainRet = struct {
 /// Pipes together multiple system commands
 pub fn chainCommands(
     a: std.mem.Allocator,
-    commands: []const Command,
+    c: []const Command,
 ) !ChainRet {
     var arena = std.heap.ArenaAllocator.init(a);
     const allocator = arena.allocator();
     defer arena.deinit();
 
-    // TODO: proper error handling
+    if (c.len == 0) {
+        return .{
+            .idx = 0,
+            .ret = .success,
+        };
+    }
+
+    const heredoc_pipe = try posix.pipe();
+    var commands = c;
+
+    // TODO: don't hardcode this
+    var heredoc = false;
+    var heredoc_string: []const u8 = "END";
+    if (c[0] == .system) {
+        if (std.mem.eql(u8, c[0].system.name, "<<")) {
+            heredoc = true;
+            commands = c[1..];
+
+            if (c[0].system.arguments.len == 1) {
+                heredoc_string = c[0].system.arguments[0];
+            }
+        }
+    }
+
     const pipes = try allocator.alloc(
         [2]posix.fd_t,
         commands.len - 1,
     );
     defer allocator.free(pipes);
 
+    // For system commands, these are only used to detect an execve failure
+    // but for modules, they are used to set shell variables via fileno `4`
     const error_pipes = try allocator.alloc(
         [2]posix.fd_t,
         commands.len,
@@ -80,57 +105,13 @@ pub fn chainCommands(
         }) catch unreachable;
     }
 
-    const environ_len = std.os.environ.len + 1;
-
-    const t: []?[*:0]const u8 = allocator.alloc(
-        ?[*:0]const u8,
-        environ_len + 1,
-    ) catch unreachable;
-    t[environ_len] = null;
-    for (std.os.environ, 0..) |env, idx| {
-        t[idx] = env;
-    }
-
     var pid_map = std.AutoHashMap(
         posix.pid_t,
         usize,
     ).init(allocator);
     defer pid_map.deinit();
 
-    t[environ_len - 1] = "bruh:u32=\x45\x00\x00\x00";
-
-    const environ: [][*:0]const u8 = @ptrCast(t[0..environ_len :null]);
-
     for (commands, 0..) |command, idx| {
-        var command_string: ?[*:null]?[*:0]const u8 = null;
-
-        // Need to do allocations before forking because
-        // calling malloc (which could possibly be the allocator given) in a
-        // fork child is illegal under POSIX
-        if (command == .system) {
-            const args = command.system.arguments orelse &.{};
-
-            const temp = allocator.alloc(
-                ?[*:0]const u8,
-                args.len + 2,
-            ) catch unreachable;
-
-            temp[args.len + 1] = null;
-            command_string = temp[0 .. args.len + 1 :null];
-
-            command_string.?[0] = (allocator.dupeZ(
-                u8,
-                command.system.name,
-            ) catch unreachable).ptr;
-
-            for (args, 1..) |arg, idx2| {
-                command_string.?[idx2] = (allocator.dupeZ(
-                    u8,
-                    arg,
-                ) catch unreachable).ptr;
-            }
-        }
-
         if (command != .system) {
             if (core.module_list.get(command.module.name)) |mod| {
                 if (mod.exec_mode == .function) {
@@ -156,9 +137,14 @@ pub fn chainCommands(
         if (pid != 0) continue;
 
         // Child
+        if (heredoc and idx == 0) {
+            std.debug.print("cmd0 \n", .{});
+            try posix.dup2(heredoc_pipe[0], posix.STDIN_FILENO);
+        }
 
         // Pipe stdin and stdout if needed
         if (commands.len > 1) {
+
             // > first command
             if (idx > 0) {
                 try posix.dup2(pipes[idx - 1][0], posix.STDIN_FILENO);
@@ -171,6 +157,7 @@ pub fn chainCommands(
         }
 
         // Close pipes
+        posix.close(heredoc_pipe[1]);
         for (pipes) |pipe| {
             posix.close(pipe[0]);
             posix.close(pipe[1]);
@@ -180,57 +167,128 @@ pub fn chainCommands(
         try core.enableSig(.interrupt);
         try core.enableSig(.quit);
 
+        var exit_code: u8 = 0;
+        var err_pipe_contents: []const u8 = "\x00";
+
         // Execute command
         if (command != .system) {
+            try posix.dup2(error_pipes[idx][1], 4);
+
             // TODO: error
             const mod = core.module_list.get(
                 command.module.name,
             ) orelse unreachable;
 
-            posix.exit(@intFromEnum(mod.main(command.module.arguments)));
-        } else {
-            const err = posix.execvpeZ(
-                command_string.?[0].?,
-                command_string.?,
-                @ptrCast(environ.ptr),
+            exit_code = @intFromEnum(
+                mod.main(command.module.arguments),
             );
+        } else {
+            var argv = std.ArrayList([]const u8).init(a);
+
+            try argv.append(command.system.name);
+            try argv.appendSlice(command.system.arguments);
+
+            const err = std.process.execv(
+                a,
+                argv.items,
+            );
+
+            _ = posix.write(
+                error_pipes[idx][1],
+                "E",
+            ) catch unreachable;
 
             const errno: core.Error = switch (err) {
                 error.FileNotFound => .command_not_found,
                 else => unreachable,
             };
 
-            _ = posix.write(
-                error_pipes[idx][1],
-                &.{@intFromEnum(errno)},
-            ) catch unreachable;
+            err_pipe_contents = &.{@intFromEnum(errno)};
 
-            for (error_pipes) |pipe| {
-                posix.close(pipe[0]);
-                posix.close(pipe[1]);
-            }
-
-            posix.exit(127);
+            exit_code = 127;
         }
+
+        _ = posix.write(
+            error_pipes[idx][1],
+            err_pipe_contents,
+        ) catch unreachable;
+
+        for (error_pipes) |pipe| {
+            posix.close(pipe[0]);
+            posix.close(pipe[1]);
+        }
+
+        posix.exit(exit_code);
     }
 
     // Close pipes in parent
+    posix.close(heredoc_pipe[0]);
     for (pipes) |pipe| {
         posix.close(pipe[0]);
         posix.close(pipe[1]);
     }
 
-    var buf: [1]u8 = .{0};
-    for (error_pipes) |pipe| {
+    var buf: [4]u8 = undefined;
+    buf[0] = 0;
+
+    var err: core.Error = .success;
+    var i: usize = 0;
+
+    for (error_pipes, 0..) |pipe, pipe_idx| {
         posix.close(pipe[1]);
 
-        // If we can't read from the error pipe, it should be safe to
-        // assume it's been closed due to a successful command exec
-        _ = posix.read(pipe[0], &buf) catch {};
+        var variable_buf = std.ArrayList(u8).init(allocator);
+        defer variable_buf.deinit();
+
+        while (true) {
+            // If we can't read from the error pipe, it should be safe to
+            // assume it's been closed due to a successful command exec
+            const read_amount = posix.read(
+                pipe[0],
+                &buf,
+            ) catch 0;
+
+            if (read_amount > 0) {
+                try variable_buf.appendSlice(
+                    buf[0..read_amount],
+                );
+            } else {
+                break;
+            }
+        }
+
+        if (variable_buf.items.len < 2) continue;
+
+        const id = variable_buf.items[0];
+
+        switch (id) {
+            'V' => {
+                const name_len = variable_buf.items[1];
+
+                shell.variables.put(
+                    variable_buf.items[2..][0..name_len],
+                    variable_buf.items[2..][name_len .. variable_buf.items.len - 3],
+                ) catch unreachable;
+            },
+            'P' => {
+                const name_len = variable_buf.items[1];
+
+                shell.procedures.put(
+                    variable_buf.items[2..][0..name_len],
+                    variable_buf.items[2..][name_len .. variable_buf.items.len - 3],
+                ) catch unreachable;
+            },
+            'E' => {
+                err = @enumFromInt(variable_buf.items[1]);
+                i = pipe_idx;
+            },
+            else => |new_id| {
+                std.debug.print("id {c} {x}\n", .{ new_id, new_id });
+            },
+        }
+
         posix.close(pipe[0]);
     }
-
-    const err: core.Error = @enumFromInt(buf[0]);
 
     var ret = ChainRet{
         .ret = if (err == .success) blk: {
@@ -240,8 +298,35 @@ pub fn chainCommands(
                 .exec_failure = err,
             };
         },
-        .idx = 0,
+        .idx = i,
     };
+
+    var stdin_file = std.io.getStdIn();
+    var heredoc_file = std.fs.File{
+        .handle = heredoc_pipe[1],
+    };
+
+    if (heredoc) {
+        var list = std.ArrayList(u8).init(a);
+        defer list.deinit();
+
+        while (true) {
+            try stdin_file.reader().streamUntilDelimiter(
+                list.writer(),
+                '\n',
+                null,
+            );
+
+            if (std.mem.eql(u8, heredoc_string, list.items)) {
+                break;
+            }
+
+            heredoc_file.writer().print("{s}\n", .{list.items}) catch break;
+            list.shrinkAndFree(0);
+        }
+
+        posix.close(heredoc_pipe[1]);
+    }
 
     // Wait for all commands to exit
     for (commands) |_| {
