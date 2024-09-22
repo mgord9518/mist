@@ -15,6 +15,8 @@ pub const help = core.Help{
 pub fn main(arguments: []const core.Argument) core.Error {
     //const stdout = std.io.getStdOut().writer();
 
+    var stdin_file = std.io.getStdIn();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -35,6 +37,9 @@ pub fn main(arguments: []const core.Argument) core.Error {
     if (target == null) return .usage_error;
 
     const proc_data = shell.procedures.get(target.?).?;
+
+    std.debug.print("PROC DAT {s}\n", .{proc_data});
+
     var fbs = std.io.fixedBufferStream(proc_data);
 
     var buf: [4096]u8 = undefined;
@@ -45,6 +50,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     while (fbs.reader().readUntilDelimiterOrEof(&buf, '\n') catch unreachable) |line| : (line_num += 1) {
         const exit_status = shell.runLine(
             allocator,
+            stdin_file.reader(),
             line,
             true,
         ) catch unreachable;

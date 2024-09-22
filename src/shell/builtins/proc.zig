@@ -10,40 +10,50 @@ pub const help = core.Help{
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
-    if (arguments.len != 1) return .usage_error;
+    realMain(arguments) catch |err| {
+        return switch (err) {
+            error.NoSpaceLeft => .no_space_left,
+            error.UsageError => .no_space_left,
+            else => .unknown_error,
+        };
+    };
+
+    return .success;
+}
+
+fn realMain(arguments: []const core.Argument) !void {
+    if (arguments.len != 1) return error.UsageError;
 
     const name = if (arguments[0] == .positional) blk: {
         break :blk arguments[0].positional;
     } else {
-        return .usage_error;
+        return error.UsageError;
     };
 
-    if (name.len > 255) return .no_space_left;
+    if (name.len > 255) return error.NoSpaceLeft;
 
-    // `P` for procedure
-    _ = std.posix.write(4, "P") catch unreachable;
+    var stdin_file = std.io.getStdIn();
 
-    _ = std.posix.write(
-        4,
-        &.{@as(u8, @intCast(name.len))},
-    ) catch unreachable;
+    var fbs = std.io.fixedBufferStream(shell.shm);
 
-    _ = std.posix.write(4, name) catch unreachable;
+    _ = try fbs.write("P");
+    _ = try fbs.writer().writeInt(u8, @intCast(name.len), .little);
 
-    var buf: [4096]u8 = undefined;
+    _ = try fbs.write(name);
+    _ = try fbs.writer().writeInt(u16, 10, .little);
+
     while (true) {
-        const read_amount = std.posix.read(
-            std.posix.STDIN_FILENO,
-            &buf,
-        ) catch unreachable;
-
-        if (read_amount == 0) break;
-
-        _ = std.posix.write(
-            4,
-            buf[0..read_amount],
-        ) catch unreachable;
+        stdin_file.reader().streamUntilDelimiter(
+            fbs.writer(),
+            '\n',
+            null,
+        ) catch |err| {
+            switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            }
+        };
     }
 
-    return .success;
+    std.debug.print("fbs {}\n", .{fbs.pos});
 }

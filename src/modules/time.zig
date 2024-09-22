@@ -12,6 +12,7 @@ pub const help = core.Help{
 
 pub fn main(arguments: []const core.Argument) core.Error {
     const stderr = std.io.getStdErr().writer();
+    var stdin_file = std.io.getStdIn();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -36,6 +37,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     const exit_status = shell.runLine(
         allocator,
+        stdin_file.reader(),
         sys_args[0],
         true,
     ) catch unreachable;

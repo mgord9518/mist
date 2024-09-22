@@ -5,7 +5,6 @@ const time = @import("time.zig");
 const greeting = @embedFile("greeting");
 
 pub const modules = core.modules;
-pub const VariableMap = @import("shell/VariableMap.zig");
 
 const pipe = @import("shell/pipe.zig");
 const parser = @import("shell/parser.zig");
@@ -18,13 +17,18 @@ pub const exec_mode: core.ExecMode = .fork;
 pub var logical_path: []const u8 = undefined;
 pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
+// 1st byte: identifier. `P` for procedure
+// 2nd byte: u8, length of procedure name
+// Next 2 bytes: LE u16, length of procedure
+pub var shm: []align(std.mem.page_size) u8 = undefined;
+
 pub const help = core.Help{
     .description = "minimal interactive shell. use `commands` for a list of built-in commands",
     .usage = "[SCRIPT]",
 };
 
-pub var variables: VariableMap = undefined;
-pub var procedures: VariableMap = undefined;
+pub var variables: std.BufMap = undefined;
+pub var procedures: std.BufMap = undefined;
 pub var history: History = undefined;
 
 pub const Command = union(enum) {
@@ -83,6 +87,7 @@ pub fn processCommand(allocator: std.mem.Allocator, command: Command) !Command {
 
 pub fn runLine(
     allocator: std.mem.Allocator,
+    reader: anytype,
     line: []const u8,
     interactive: bool,
 ) !pipe.ChainRet {
@@ -117,6 +122,7 @@ pub fn runLine(
 
     const exit_status = try pipe.chainCommands(
         arena_allocator,
+        reader,
         pipe_line.items,
     );
 
@@ -168,6 +174,8 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
 
         const exit_status = runLine(
             allocator,
+            //file.reader(),
+            reader,
             line,
             false,
         ) catch unreachable;
@@ -219,6 +227,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
+    var stdin_file = std.io.getStdIn();
+
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
         if (arg == .option) return .usage_error;
@@ -232,13 +242,18 @@ pub fn main(arguments: []const core.Argument) core.Error {
         &logical_path_buf,
     ) catch return .cwd_not_found;
 
-    variables = VariableMap.init(allocator);
+    variables = std.BufMap.init(allocator);
     defer variables.deinit();
 
     variables.put("mist.exit_code", "0") catch {};
 
-    procedures = VariableMap.init(allocator);
+    procedures = std.BufMap.init(allocator);
     defer procedures.deinit();
+
+    procedures.put(
+        "TEST",
+        "print hi",
+    ) catch unreachable;
 
     if (target) |script_path| {
         variables.put(
@@ -473,6 +488,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
         const exit_status = runLine(
             allocator,
+            stdin_file.reader(),
             line.items,
             true,
         ) catch unreachable;

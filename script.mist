@@ -11,6 +11,8 @@ print $0
 eql 1 1
 eql "" ""
 
+print b4
+
 # TODO: finish HEREDOC
 # Procedures are (will be once implemented) simple
 # instruction lists that the shell will load when called
@@ -22,7 +24,9 @@ eql "" ""
     print "proc ended!"
 end
 
-my_procedure
+print after
+
+run_proc my_procedure
 
 if eql 1 1 2		: false
 if eql 472bfkwpwbrw 0	: false

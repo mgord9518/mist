@@ -235,9 +235,6 @@ pub fn printHelp(name: []const u8, h: ?Help) !void {
 
     try stdout.print("\n\n", .{});
 
-    try usagePrint(stdout, help.usage);
-    try stdout.print("\n", .{});
-
     if (help.options) |options| {
         try stdout.print(
             \\{1s}options{0s}:

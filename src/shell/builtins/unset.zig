@@ -18,13 +18,9 @@ pub fn main(arguments: []const core.Argument) core.Error {
         return .usage_error;
     };
 
-    const was_present = shell.variables.remove(
+    shell.variables.remove(
         name,
     );
-
-    if (!was_present) {
-        return .invalid_variable;
-    }
 
     return .success;
 }
