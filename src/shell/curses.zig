@@ -105,36 +105,6 @@ pub fn setTerminalMode(mode: TerminalMode) !void {
     );
 }
 
-fn setTerminalToNormalModee() !void {
-    var term_info = try std.posix.tcgetattr(
-        std.posix.STDIN_FILENO,
-    );
-
-    term_info.lflag.ECHO = true;
-    term_info.lflag.ICANON = true;
-
-    try std.posix.tcsetattr(
-        std.posix.STDIN_FILENO,
-        .NOW,
-        term_info,
-    );
-}
-
-fn setTerminalToRawModae() !void {
-    var term_info = try std.posix.tcgetattr(
-        std.posix.STDIN_FILENO,
-    );
-
-    term_info.lflag.ECHO = false;
-    term_info.lflag.ICANON = false;
-
-    try std.posix.tcsetattr(
-        std.posix.STDIN_FILENO,
-        .NOW,
-        term_info,
-    );
-}
-
 pub const Size = struct {
     w: u16,
     h: u16,

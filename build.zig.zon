@@ -11,10 +11,10 @@
         //   .hash = "1220bf2e61ff94f4a1a9ffd6ee1bc14b462c769e3a17394895dd2ca11e6e4536d7dc",
         //},
 
-        .base91 = .{
-            .url = "https://github.com/mgord9518/base91-zig/archive/refs/tags/continuous.tar.gz",
-            .hash = "1220920ba701d7f6f846593ccb646c27f56499819e6b53fe46bbd9d4beaa6408b846",
-        },
+        //        .base91 = .{
+        //            .url = "https://github.com/mgord9518/base91-zig/archive/refs/tags/continuous.tar.gz",
+        //            .hash = "1220920ba701d7f6f846593ccb646c27f56499819e6b53fe46bbd9d4beaa6408b846",
+        //        },
     },
 
     .paths = .{
