@@ -22,15 +22,15 @@ pub const @"#!" = @import("modules/#.zig");
 
 // Shell builtins
 //pub const @"if" = @import("shell/builtins/if.zig");
-pub const cd = @import("shell/builtins/cd.zig");
-pub const commands = @import("shell/builtins/commands.zig");
-pub const exit = @import("shell/builtins/exit.zig");
-pub const history = @import("shell/builtins/history.zig");
-pub const prompt = @import("shell/builtins/prompt.zig");
-pub const read = @import("shell/builtins/read.zig");
-pub const set = @import("shell/builtins/set.zig");
-pub const unset = @import("shell/builtins/unset.zig");
-pub const run_proc = @import("shell/builtins/run_proc.zig");
-pub const proc = @import("shell/builtins/proc.zig");
+pub const cd = @import("modules/cd.zig");
+pub const commands = @import("modules/commands.zig");
+pub const exit = @import("modules/exit.zig");
+pub const history = @import("modules/history.zig");
+pub const prompt = @import("modules/prompt.zig");
+pub const read = @import("modules/read.zig");
+pub const set = @import("modules/set.zig");
+pub const unset = @import("modules/unset.zig");
+pub const run_proc = @import("modules/run_proc.zig");
+pub const proc = @import("modules/proc.zig");
 
 //pub const wasm = @import("modules/wasm.zig");

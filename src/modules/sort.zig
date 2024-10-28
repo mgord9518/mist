@@ -73,6 +73,7 @@ const SortContext = struct {
 //    return ret;
 //}
 
+// TODO fix
 /// Sorts UTF-8 strings ordered by lower to higher codepoints preferring
 /// shorter strings.
 pub fn sortByAlphabet(
@@ -82,11 +83,11 @@ pub fn sortByAlphabet(
 ) bool {
     var utf8_view_a = std.unicode.Utf8View.init(
         a,
-    ) catch return true;
+    ) catch return false;
 
     var utf8_view_b = std.unicode.Utf8View.init(
         b,
-    ) catch return false;
+    ) catch return true;
 
     var it_a = utf8_view_a.iterator();
     var it_b = utf8_view_b.iterator();
@@ -107,7 +108,7 @@ pub fn sortByAlphabet(
 
 /// Sorts strings by byte values. This is smaller and simpler than the UTF-8
 /// version but will not properly sort Unicode strings
-fn sortByAlphabetBytes(
+pub fn sortByAlphabetBytes(
     _: void,
     a: []const u8,
     b: []const u8,
@@ -128,8 +129,8 @@ fn sortByAlphabetBytes(
         a_idx += 1;
         b_idx += 1;
 
-        if (a_idx >= a.len) return true;
-        if (b_idx >= b.len) return false;
+        if (a_idx >= a.len) return false;
+        if (b_idx >= b.len) return true;
     }
 
     unreachable;

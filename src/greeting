@@ -2,9 +2,14 @@
  Welcome to [MIST] -- a Minimal Interactive Shell inspired by UNIX
 
  Immediate TODO:
-   [ ] Tab-finish
+   [-] Tab-finish
+     [x] Files
+     [ ] Module flags
+     [ ] External commands (how should this be done? Most shells seem to have complex solutions)
    [ ] Globbing (implemented via command)
    [-] Plugin system
+     [-] Source-based (needs improvement)
+     [ ] Shared objects (C ABI)
 
  For a list of builtin modules, type: `commands`
 

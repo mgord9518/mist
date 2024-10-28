@@ -1,7 +1,7 @@
 const std = @import("std");
-const core = @import("../../main.zig");
+const core = @import("../main.zig");
 const fg = core.fg;
-const shell = @import("../../shell.zig");
+const shell = @import("../shell.zig");
 const posix = std.posix;
 
 pub const exec_mode: core.ExecMode = .fork;

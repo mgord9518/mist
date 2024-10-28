@@ -1,12 +1,12 @@
 const std = @import("std");
-const core = @import("../../main.zig");
-const shell = @import("../../shell.zig");
+const core = @import("../main.zig");
+const shell = @import("../shell.zig");
 
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "set a variable from STDIN",
-    .usage = "<VARIABLE NAME>",
+    .description = "read from STDIN, creating a procedure",
+    .usage = "<PROCEDURE NAME>",
 };
 
 pub fn main(arguments: []const core.Argument) core.Error {
@@ -36,11 +36,16 @@ fn realMain(arguments: []const core.Argument) !void {
 
     var fbs = std.io.fixedBufferStream(shell.shm);
 
+    // `P` for procedure
     _ = try fbs.write("P");
+
+    // Name length, 1 byte
     _ = try fbs.writer().writeInt(u8, @intCast(name.len), .little);
 
+    // Procedure size, this will be written last
+    _ = try fbs.writer().writeInt(u16, 69, .little);
+
     _ = try fbs.write(name);
-    _ = try fbs.writer().writeInt(u16, 10, .little);
 
     while (true) {
         stdin_file.reader().streamUntilDelimiter(
@@ -56,4 +61,9 @@ fn realMain(arguments: []const core.Argument) !void {
     }
 
     std.debug.print("fbs {}\n", .{fbs.pos});
+
+    const total: u16 = @intCast(fbs.pos - 4 - name.len);
+
+    try fbs.seekableStream().seekTo(2);
+    _ = try fbs.writer().writeInt(u16, total, .little);
 }

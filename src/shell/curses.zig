@@ -105,7 +105,7 @@ pub fn setTerminalMode(mode: TerminalMode) !void {
     );
 }
 
-fn setTerminalToNormalMode() !void {
+fn setTerminalToNormalModee() !void {
     var term_info = try std.posix.tcgetattr(
         std.posix.STDIN_FILENO,
     );
@@ -120,7 +120,7 @@ fn setTerminalToNormalMode() !void {
     );
 }
 
-fn setTerminalToRawMode() !void {
+fn setTerminalToRawModae() !void {
     var term_info = try std.posix.tcgetattr(
         std.posix.STDIN_FILENO,
     );
@@ -140,6 +140,11 @@ pub const Size = struct {
     h: u16,
 };
 
+pub const Vector = struct {
+    row: u16,
+    col: u16,
+};
+
 pub fn terminalSize() Size {
     var ioctl: std.posix.system.winsize = undefined;
     _ = std.posix.system.ioctl(
@@ -152,4 +157,23 @@ pub fn terminalSize() Size {
         .w = ioctl.ws_col,
         .h = ioctl.ws_row,
     };
+}
+
+// TODO
+pub fn cursorPosition() !Vector {
+    const cwd = std.fs.cwd();
+    const tty = try cwd.openFile("/dev/tty", .{});
+    defer tty.close();
+
+    var buf: [16]u8 = undefined;
+
+    tty.writer().print("\x1b[6n\n", .{}) catch {};
+
+    // TODO: read from /dev/tty
+    const bytes = try tty.reader().read(&buf);
+    _ = &bytes;
+
+    std.debug.print("size {s}\n", .{buf[0..bytes]});
+
+    return undefined;
 }

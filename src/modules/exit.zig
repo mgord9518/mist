@@ -1,6 +1,6 @@
 const std = @import("std");
-const core = @import("../../main.zig");
-const curses = @import("../../shell/curses.zig");
+const core = @import("../main.zig");
+const curses = @import("../shell/curses.zig");
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .function;

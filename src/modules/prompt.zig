@@ -1,8 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
-const core = @import("../../main.zig");
-const shell = @import("../../shell.zig");
-const time = @import("../../time.zig");
+const core = @import("../main.zig");
+const shell = @import("../shell.zig");
+const time = @import("../time.zig");
 const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .function;

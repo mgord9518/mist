@@ -1,8 +1,8 @@
 const std = @import("std");
-const core = @import("../../main.zig");
-const shell = @import("../../shell.zig");
-const parser = @import("../../shell/parser.zig");
-const pipe = @import("../../shell/pipe.zig");
+const core = @import("../main.zig");
+const shell = @import("../shell.zig");
+const parser = @import("../shell/parser.zig");
+const pipe = @import("../shell/pipe.zig");
 const builtin = @import("builtin");
 
 pub const exec_mode: core.ExecMode = .function;

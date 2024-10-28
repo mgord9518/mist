@@ -20,6 +20,7 @@ pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 // 1st byte: identifier. `P` for procedure
 // 2nd byte: u8, length of procedure name
 // Next 2 bytes: LE u16, length of procedure
+// Immediately followed by the procedure name, then the procedure contents
 pub var shm: []align(std.mem.page_size) u8 = undefined;
 
 pub const help = core.Help{
@@ -44,6 +45,101 @@ pub const Command = union(enum) {
         name: []const u8,
         arguments: []const []const u8 = &.{},
     },
+};
+
+const Line = struct {
+    pos: usize,
+    contents: std.ArrayList(u8),
+
+    fn backspace(line: *Line) void {
+        curses.backspace();
+        line.pos -= 1;
+
+        // Step back to start byte if needed
+        while (line.contents.items[line.pos] & 0b1100_0000 == 0b1000_0000) {
+            line.pos -= 1;
+        }
+
+        var remaining = utf8ContinueLen(line.contents.items[line.pos]);
+
+        _ = line.contents.orderedRemove(line.pos);
+
+        while (remaining > 0) : (remaining -= 1) {
+            _ = line.contents.orderedRemove(line.pos);
+        }
+    }
+
+    fn replaceWith(line: *Line, new_contents: []const u8) !void {
+        line.contents.shrinkAndFree(0);
+        try line.contents.appendSlice(new_contents);
+
+        curses.restorePosition();
+        curses.clearLine(.right);
+
+        std.debug.print("{s}", .{line.contents.items});
+
+        line.pos = line.contents.items.len;
+    }
+
+    // Tab-finish, auto-fills the "word" that contians the cursor if a matching
+    // filename is found
+    fn autoFinishWord(
+        line: *Line,
+        allocator: std.mem.Allocator,
+    ) !void {
+        var it = try parser.SyntaxIterator.init(
+            allocator,
+            line.contents.items,
+        );
+        defer it.deinit();
+
+        var token_start: usize = 0;
+        var word: []const u8 = "";
+
+        while (try it.nextToken()) |token| {
+            if (token != .string) {
+                token_start = it.pos;
+                continue;
+            }
+
+            if (line.pos < token_start or line.pos > it.pos) {
+                allocator.free(token.string);
+                continue;
+            }
+
+            token_start = it.pos;
+            word = token.string;
+        }
+
+        const cwd = std.fs.cwd();
+        var dir = try cwd.openDir(
+            parentPath(word),
+            .{ .iterate = true },
+        );
+
+        const basename = std.fs.path.basename(word);
+
+        var dir_it = dir.iterate();
+        while (try dir_it.next()) |entry| {
+            if (entry.name.len < basename.len) continue;
+
+            const start = entry.name[0..basename.len];
+            //const remain = entry.name[start.len..];
+
+            if (!std.mem.eql(u8, start, basename)) continue;
+
+            _ = try line.contents.appendSlice(entry.name[basename.len..]);
+
+            // TODO: Proper cursor placement when in middle of word
+            //curses.move(.right, remain.len);
+            curses.insert(entry.name[basename.len..]);
+
+            line.pos += entry.name[basename.len..].len;
+
+            // TODO: allow selecting between all available
+            break;
+        }
+    }
 };
 
 // Re-allocs a command and converts it to a module if needed
@@ -133,6 +229,22 @@ pub fn runLine(
             const mod = core.module_list.get(mod_name) orelse unreachable;
             core.printHelp(mod_name, mod.help) catch {};
         }
+    }
+
+    // Procedure set, lets read it
+    if (shm[0] == 'P') {
+        const name_len = shm[1];
+        const name = shm[4..][0..name_len];
+        const procedure_len_u8 = shm[2..4];
+        const procedure_len: u16 = @bitCast(procedure_len_u8.*);
+        const procedure = shm[4..][name_len..][0..procedure_len];
+
+        procedures.put(
+            name,
+            procedure,
+        ) catch unreachable;
+
+        shm[0] = '\x00';
     }
 
     return exit_status;
@@ -229,6 +341,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var stdin_file = std.io.getStdIn();
 
+    shm = std.posix.mmap(
+        null,
+        4096,
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .TYPE = .SHARED, .ANONYMOUS = true },
+        -1,
+        0,
+    ) catch unreachable;
+    defer std.posix.munmap(shm);
+
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
         if (arg == .option) return .usage_error;
@@ -311,8 +433,10 @@ pub fn main(arguments: []const core.Argument) core.Error {
         var line = std.ArrayList(u8).init(allocator);
         defer line.deinit();
 
-        var cursor_pos: usize = 0;
-        var vcursor_pos: usize = 0;
+        var current_line = Line{
+            .contents = line,
+            .pos = 0,
+        };
 
         var restart = false;
 
@@ -324,18 +448,17 @@ pub fn main(arguments: []const core.Argument) core.Error {
             if (char == '\n') {
                 stdout.print("\n", .{}) catch return .unknown_error;
                 print_prompt = true;
-                cursor_pos = 0;
-                vcursor_pos = 0;
+                current_line.pos = 0;
 
-                if (line.items.len == 0) break;
+                if (current_line.contents.items.len == 0) break;
                 if (std.mem.eql(
                     u8,
-                    line.items,
+                    current_line.contents.items,
                     history.last() orelse "",
                 )) break;
 
                 history.append(
-                    history.allocator.dupe(u8, line.items) catch return .unknown_error,
+                    history.allocator.dupe(u8, current_line.contents.items) catch return .unknown_error,
                 ) catch return .unknown_error;
 
                 break;
@@ -354,32 +477,15 @@ pub fn main(arguments: []const core.Argument) core.Error {
             // Backspace
             if (char == '\x7f') {
                 print_handled = true;
-                if (cursor_pos > 0) {
-                    curses.backspace();
-                    cursor_pos -= 1;
-                    vcursor_pos -= 1;
-
-                    // Step back to start byte if needed
-                    while (line.items[cursor_pos] & 0b1100_0000 == 0b1000_0000) {
-                        cursor_pos -= 1;
-                    }
-
-                    var remaining = utf8ContinueLen(line.items[cursor_pos]);
-
-                    _ = line.orderedRemove(cursor_pos);
-
-                    while (remaining > 0) : (remaining -= 1) {
-                        _ = line.orderedRemove(cursor_pos);
-                    }
+                if (current_line.pos > 0) {
+                    current_line.backspace();
                 }
             }
 
             if (char == '\t') {
                 print_handled = true;
-                autoFinishLine(
+                current_line.autoFinishWord(
                     allocator,
-                    line.items,
-                    cursor_pos,
                 ) catch unreachable;
             }
 
@@ -396,16 +502,8 @@ pub fn main(arguments: []const core.Argument) core.Error {
                         if (history_cursor >= history.list.items.len) continue;
                         history_cursor += 1;
 
-                        line.shrinkAndFree(0);
-                        line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
+                        current_line.replaceWith(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
 
-                        curses.restorePosition();
-                        curses.clearLine(.right);
-
-                        stdout.print("{s}", .{line.items}) catch return .unknown_error;
-
-                        cursor_pos = line.items.len;
-                        vcursor_pos = line.items.len;
                         continue;
                     },
                     // Down arrow
@@ -413,41 +511,38 @@ pub fn main(arguments: []const core.Argument) core.Error {
                         //if (history_cursor <= 1) continue;
                         if (history_cursor > 0) history_cursor -= 1;
 
-                        line.shrinkAndFree(0);
+                        current_line.contents.shrinkAndFree(0);
 
                         if (history_cursor > 0) {
-                            line.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
+                            current_line.contents.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
                         }
 
                         curses.restorePosition();
                         curses.clearLine(.right);
 
-                        stdout.print("{s}", .{line.items}) catch return .unknown_error;
-                        cursor_pos = line.items.len;
-                        vcursor_pos = line.items.len;
+                        stdout.print("{s}", .{current_line.contents.items}) catch return .unknown_error;
+                        current_line.pos = current_line.contents.items.len;
                         continue;
                     },
                     'C' => {
-                        if (cursor_pos < line.items.len) {
-                            const remaining: u3 = utf8ContinueLen(line.items[cursor_pos]);
+                        if (current_line.pos < current_line.contents.items.len) {
+                            const remaining: u3 = utf8ContinueLen(current_line.contents.items[current_line.pos]);
 
                             curses.move(.right, 1);
-                            cursor_pos += 1 + remaining;
-                            vcursor_pos += 1 + remaining;
+                            current_line.pos += 1 + remaining;
                         }
 
                         continue;
                     },
                     'D' => {
-                        if (cursor_pos > 0) {
+                        if (current_line.pos > 0) {
                             curses.move(.left, 1);
-                            cursor_pos -= 1;
-                            vcursor_pos -= 1;
+                            current_line.pos -= 1;
                         }
 
                         // Step back to start byte if needed
-                        while (cursor_pos < line.items.len and line.items.len > 0 and line.items[cursor_pos] & 0b1100_0000 == 0b1000_0000) {
-                            cursor_pos -= 1;
+                        while (current_line.pos < current_line.contents.items.len and current_line.contents.items.len > 0 and current_line.contents.items[current_line.pos] & 0b1100_0000 == 0b1000_0000) {
+                            current_line.pos -= 1;
                         }
 
                         continue;
@@ -468,17 +563,23 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
                 const codepoint = utf8_buf[0 .. continue_len + 1];
 
+                const size = curses.terminalSize();
+                _ = size;
+
+                //  const pos = curses.cursorPosition() catch unreachable;
+                // _ = pos;
+                //if ()
+
                 for (codepoint, 0..) |byte, idx| {
-                    _ = line.insert(
-                        cursor_pos + idx,
+                    _ = current_line.contents.insert(
+                        current_line.pos + idx,
                         byte,
                     ) catch return .unknown_error;
                 }
 
                 curses.insert(codepoint);
 
-                cursor_pos += continue_len + 1;
-                vcursor_pos += 1;
+                current_line.pos += continue_len + 1;
             }
         }
 
@@ -489,7 +590,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         const exit_status = runLine(
             allocator,
             stdin_file.reader(),
-            line.items,
+            current_line.contents.items,
             true,
         ) catch unreachable;
 
@@ -507,47 +608,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
     }
 }
 
-fn autoFinishLine(
-    allocator: std.mem.Allocator,
-    line: []const u8,
-    cursor_pos: usize,
-) !void {
-    const cwd = std.fs.cwd();
-    var dir = try cwd.openDir(".", .{ .iterate = true });
+fn parentPath(path: []const u8) []const u8 {
+    if (path.len == 0) return ".";
 
-    var it = try parser.SyntaxIterator.init(
-        allocator,
-        line,
-    );
-    defer it.deinit();
+    if (std.fs.path.dirname(path) == null) {
+        if (path[0] == '/') return "/";
 
-    var token_start: usize = 0;
-    while (try it.nextToken()) |token| {
-        if (token != .string) {
-            token_start = it.pos;
-            continue;
-        }
-
-        if (cursor_pos < token_start) continue;
-        if (cursor_pos > it.pos) continue;
-
-        const word = token.string;
-
-        var dir_it = dir.iterate();
-        while (try dir_it.next()) |entry| {
-            if (entry.name.len < word.len) continue;
-
-            if (std.mem.eql(u8, entry.name[0..word.len], word)) {
-                std.debug.print("\nls {s}", .{
-                    entry.name,
-                });
-            }
-        }
-
-        allocator.free(word);
-
-        token_start = it.pos;
+        return ".";
     }
+
+    return std.fs.path.dirname(path).?;
 }
 
 pub fn statusCode(
@@ -568,7 +638,7 @@ pub fn statusName(
     return switch (exec_status) {
         .success => null,
         .signal => |signal| @tagName(signal),
-        .exec_failure => "command_not_found",
+        .exec_failure => |code| @tagName(code),
         .module_exit_failure => |err| {
             if (err == .success) return null;
 

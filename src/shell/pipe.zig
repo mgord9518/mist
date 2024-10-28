@@ -64,19 +64,6 @@ pub fn chainCommands(
         };
     }
 
-    shell.shm = try std.posix.mmap(
-        null,
-        4096,
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
-        .{
-            .TYPE = .SHARED,
-            .ANONYMOUS = true,
-        },
-        -1,
-        0,
-    );
-    defer std.posix.munmap(shell.shm);
-
     const heredoc_pipe = try posix.pipe();
     var commands = c;
 
@@ -215,14 +202,18 @@ pub fn chainCommands(
 
                 const errno: core.Error = switch (err) {
                     error.FileNotFound => .command_not_found,
+                    error.AccessDenied => .access_denied,
+                    error.NameTooLong => .name_too_long,
+                    error.SystemResources => .system_resources,
                     else => {
+                        std.debug.print("FIXME {s} {!}\n", .{ @src().file, err });
                         unreachable;
                     },
                 };
 
                 err_pipe_contents = &.{@intFromEnum(errno)};
 
-                exit_code = 127;
+                exit_code = @intFromEnum(errno);
             },
         }
 
@@ -351,8 +342,10 @@ pub fn chainCommands(
                 ) catch unreachable;
             },
             'E' => {
+                const code = variable_buf.items[1];
+
                 ret.ret = .{
-                    .exec_failure = @enumFromInt(variable_buf.items[1]),
+                    .exec_failure = @enumFromInt(code),
                 };
                 ret.idx = pipe_idx;
             },

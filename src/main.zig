@@ -29,6 +29,7 @@ pub const Error = enum(u7) {
     file_not_found,
     access_denied,
     cwd_not_found,
+    name_too_long,
 
     // IO
     read_failure,
@@ -38,10 +39,11 @@ pub const Error = enum(u7) {
     invalid_variable,
     invalid_env_variable,
 
-    // Memory
+    // System
     out_of_memory,
     no_space_left,
     not_equal,
+    system_resources,
 
     // Encoding/ compression
     corrupt_input,

@@ -139,9 +139,11 @@ pub fn main(arguments: []const core.Argument) core.Error {
     const size = curses.terminalSize();
 
     const col_width = longest + 2;
-    const col_num = if (!long and !single_column) blk: {
+    var col_num = if (!long and !single_column) blk: {
         break :blk (size.w / col_width);
     } else 1;
+
+    if (col_num < 1) col_num = 1;
 
     var files_per_col = (file_list.items.len / (col_num));
     if (file_list.items.len % col_num != 0) files_per_col += 1;
@@ -235,8 +237,8 @@ const SortContext = struct {
 
 fn sortFn(ctx: SortContext, a: Entry, b: Entry) bool {
     const ret = switch (ctx.order) {
-        .alphabetic => sort.sortByAlphabet({}, a.path, b.path),
-        //.alphabetic => sortByAlphabetBytes({}, a.path, b.path),
+        //.alphabetic => sort.sortByAlphabet({}, a.path, b.path),
+        .alphabetic => sort.sortByAlphabetBytes({}, a.path, b.path),
         .size => blk: {
             const sz_a = if (a.stat != null) a.stat.?.size else 0;
             const sz_b = if (b.stat != null) b.stat.?.size else 0;
