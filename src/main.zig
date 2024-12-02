@@ -30,10 +30,15 @@ pub const Error = enum(u7) {
     access_denied,
     cwd_not_found,
     name_too_long,
+    not_dir,
+    not_file,
+    sym_link_loop,
 
     // IO
     read_failure,
     write_failure,
+    input_output,
+    broken_pipe,
 
     // Variables
     invalid_variable,
@@ -50,11 +55,49 @@ pub const Error = enum(u7) {
 
     // Misc
     false,
+    invalid_argument,
 
     // Exec
     command_cannot_execute = 126,
     command_not_found = 127,
 };
+
+pub fn genericMain(
+    comptime mainFn: fn ([]const Argument) anyerror!void,
+) fn ([]const Argument) Error {
+    return struct {
+        pub fn main(arguments: []const Argument) Error {
+            mainFn(arguments) catch |err| {
+                return switch (err) {
+                    error.NoSpaceLeft => .no_space_left,
+                    error.UsageError => .usage_error,
+                    error.InputOutput => .input_output,
+                    error.OutOfMemory => .out_of_memory,
+
+                    error.FileTooBig,
+                    error.DiskQuota,
+                    error.ProcessFdQuotaExceeded,
+                    error.SystemFdQuotaExceeded,
+                    error.DeviceBusy,
+                    error.SystemResources,
+                    error.NotOpenForWriting,
+                    => .system_resources,
+
+                    error.NotDir => .not_dir,
+                    error.SymLinkLoop => .sym_link_loop,
+                    error.InvalidArgument => .invalid_argument,
+                    error.AccessDenied => .access_denied,
+                    error.BrokenPipe => .broken_pipe,
+                    error.FileNotFound => .file_not_found,
+
+                    else => .unknown_error,
+                };
+            };
+
+            return .success;
+        }
+    }.main;
+}
 
 pub const Module = struct {
     help: ?Help,

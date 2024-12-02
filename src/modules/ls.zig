@@ -30,7 +30,9 @@ const Entry = struct {
     kind: std.fs.File.Kind,
 };
 
-pub fn main(arguments: []const core.Argument) core.Error {
+pub const main = core.genericMain(realMain);
+
+fn realMain(arguments: []const core.Argument) !void {
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
@@ -52,7 +54,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
             'r' => rev_sort = true,
             '1' => single_column = true,
 
-            else => return .usage_error,
+            else => return error.UsageError,
         };
 
         if (arg == .positional) {
@@ -65,12 +67,28 @@ pub fn main(arguments: []const core.Argument) core.Error {
         target orelse ".",
         .{ .iterate = true },
     ) catch |err| {
-        return switch (err) {
-            error.FileNotFound => .file_not_found,
-            error.AccessDenied => .access_denied,
+        switch (err) {
+            error.NotDir => {
+                const file = try cwd.openFile(target.?, .{});
+                defer file.close();
 
-            else => .unknown_error,
-        };
+                const stat = try file.stat();
+
+                try stdout.print(
+                    //fg(.default) ++ "{c} {o:0>4} {:>8.2} ",
+                    fg(.default) ++ "{s} {o:0>4} {:>.2}\n",
+                    .{
+                        target.?,
+                        stat.mode & 0o7777,
+                        fmtIntSizeDec(stat.size),
+                    },
+                );
+
+                return;
+            },
+
+            else => return err,
+        }
     };
 
     var file_list = std.ArrayList(Entry).init(allocator);
@@ -84,7 +102,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var longest: usize = 0;
     var it = dir.iterate();
-    while (it.next() catch return .unknown_error) |entry| {
+    while (try it.next()) |entry| {
         if (!show_hidden and entry.name[0] == '.') continue;
 
         const stat = dir.statFile(entry.name) catch blk: {
@@ -112,16 +130,16 @@ pub fn main(arguments: []const core.Argument) core.Error {
             },
         };
 
-        const file_name = allocator.dupe(u8, entry.name) catch unreachable;
+        const file_name = try allocator.dupe(u8, entry.name);
 
         longest = @max(longest, entry.name.len);
 
-        file_list.append(.{
+        try file_list.append(.{
             .kind = entry.kind,
             .color = color,
             .path = file_name,
             .stat = stat,
-        }) catch return .unknown_error;
+        });
     }
 
     if (do_sort) {
@@ -156,7 +174,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
             if (idx >= files_per_col) {
                 col += 1;
                 idx = 0;
-                _ = stdout.write("\r") catch return .unknown_error;
+                _ = try stdout.write("\r");
                 curses.move(.up, files_per_col);
             }
 
@@ -175,54 +193,54 @@ pub fn main(arguments: []const core.Argument) core.Error {
                     }
                 }
 
-                const symbol: u8 = switch (entry.kind) {
-                    .file => '-',
-                    .directory => 'd',
-                    .character_device => 'c',
-                    .block_device => 'b',
-                    .named_pipe => 'p',
-                    .sym_link => 'l',
-                    .unix_domain_socket => 's',
-                    else => '?',
-                };
-
                 const sz = if (entry.stat) |stat| blk: {
                     break :blk stat.size;
                 } else 0;
 
-                stdout.print(
+                try stdout.print(
                     fg(.default) ++ "{c} {o:0>4} {:>8.2} ",
                     .{
-                        symbol,
+                        inodeSymbol(entry.kind),
                         mode & 0o7777,
                         fmtIntSizeDec(sz),
                     },
-                ) catch return .write_failure;
+                );
             }
 
             curses.move(.right, col * col_width);
 
-            stdout.print("{s}{s}\n", .{
+            try stdout.print("{s}{s}\n", .{
                 entry.color,
                 entry.path,
-            }) catch return .write_failure;
+            });
 
             idx += 1;
         }
 
         while (idx < files_per_col) : (idx += 1) {
-            _ = stdout.write("\n") catch return .write_failure;
+            _ = try stdout.write("\n");
         }
 
-        _ = stdout.write(fg(.default)) catch return .write_failure;
+        _ = try stdout.write(fg(.default));
     } else {
         idx += 1;
         for (file_list.items) |entry| {
-            stdout.print("{s}\n", .{entry.path}) catch return .write_failure;
+            try stdout.print("{s}\n", .{entry.path});
         }
     }
+}
 
-    return .success;
+fn inodeSymbol(kind: std.fs.File.Kind) u8 {
+    return switch (kind) {
+        .file => '-',
+        .directory => 'd',
+        .character_device => 'c',
+        .block_device => 'b',
+        .named_pipe => 'p',
+        .sym_link => 'l',
+        .unix_domain_socket => 's',
+        else => '?',
+    };
 }
 
 const SortContext = struct {

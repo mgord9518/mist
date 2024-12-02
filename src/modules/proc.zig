@@ -5,21 +5,11 @@ const shell = @import("../shell.zig");
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
-    .description = "read from STDIN, creating a procedure",
+    .description = "create a procedure via commands from <STDIN>",
     .usage = "<PROCEDURE NAME>",
 };
 
-pub fn main(arguments: []const core.Argument) core.Error {
-    realMain(arguments) catch |err| {
-        return switch (err) {
-            error.NoSpaceLeft => .no_space_left,
-            error.UsageError => .no_space_left,
-            else => .unknown_error,
-        };
-    };
-
-    return .success;
-}
+pub const main = core.genericMain(realMain);
 
 fn realMain(arguments: []const core.Argument) !void {
     if (arguments.len != 1) return error.UsageError;

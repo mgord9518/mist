@@ -51,6 +51,37 @@ const Line = struct {
     pos: usize,
     contents: std.ArrayList(u8),
 
+    fn stepForward(line: *Line) void {
+        const remaining: u3 = utf8ContinueLen(line.contents.items[line.pos]);
+
+        curses.move(.right, 1);
+        line.pos += 1 + remaining;
+    }
+
+    fn stepBackward(line: *Line) void {
+        if (line.pos > 0) {
+            curses.move(.left, 1);
+            line.pos -= 1;
+        }
+
+        while (line.pos < line.contents.items.len and line.contents.items.len > 0 and line.contents.items[line.*.pos] & 0b1100_0000 == 0b1000_0000) {
+            line.pos -= 1;
+        }
+    }
+
+    fn insert(line: *Line, string: []const u8) !void {
+        for (string, 0..) |byte, idx| {
+            _ = try line.contents.insert(
+                line.pos + idx,
+                byte,
+            );
+        }
+
+        curses.insert(string);
+
+        line.pos += string.len;
+    }
+
     fn backspace(line: *Line) void {
         curses.backspace();
         line.pos -= 1;
@@ -124,17 +155,15 @@ const Line = struct {
             if (entry.name.len < basename.len) continue;
 
             const start = entry.name[0..basename.len];
-            //const remain = entry.name[start.len..];
 
             if (!std.mem.eql(u8, start, basename)) continue;
 
-            _ = try line.contents.appendSlice(entry.name[basename.len..]);
-
             // TODO: Proper cursor placement when in middle of word
-            //curses.move(.right, remain.len);
-            curses.insert(entry.name[basename.len..]);
+            try line.insert(entry.name[basename.len..]);
 
-            line.pos += entry.name[basename.len..].len;
+            if (entry.kind == .directory and line.contents.items[line.contents.items.len - 1] != '/') {
+                try line.insert("/");
+            }
 
             // TODO: allow selecting between all available
             break;
@@ -315,6 +344,10 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
     }
 }
 
+pub fn interactiveLoop() !void {
+    try curses.setTerminalMode(.raw);
+}
+
 pub fn printError(
     comptime fmt: []const u8,
     line_num: usize,
@@ -330,6 +363,135 @@ pub fn printError(
         fmt,
         args,
     );
+}
+
+fn handleInput(
+    allocator: std.mem.Allocator,
+    print_prompt: *bool,
+    current_line: *Line,
+    restart: *bool,
+    history_cursor: *usize,
+    print_handled: *bool,
+) !bool {
+    const stdout_file = std.io.getStdOut();
+    const stdout = stdout_file.writer();
+
+    var char = getChar();
+
+    switch (char) {
+        '\n' => {
+            try stdout.print("\n", .{});
+            print_prompt.* = true;
+            current_line.*.pos = 0;
+
+            if (current_line.*.contents.items.len == 0) return false;
+            if (std.mem.eql(
+                u8,
+                current_line.*.contents.items,
+                history.last() orelse "",
+            )) return false;
+
+            try history.append(
+                try history.allocator.dupe(u8, current_line.*.contents.items),
+            );
+
+            return false;
+        },
+        // Ctrl+l
+        '\x0c' => {
+            _ = modules.clear.main(&.{});
+            print_prompt.* = true;
+            restart.* = true;
+            return false;
+        },
+        // Backspace
+        '\x7f' => {
+            print_handled.* = true;
+            if (current_line.*.pos > 0) {
+                current_line.*.backspace();
+            }
+        },
+        '\t' => {
+            print_handled.* = true;
+            try current_line.*.autoFinishWord(
+                allocator,
+            );
+        },
+        else => {},
+    }
+
+    print_prompt.* = false;
+
+    // ANSI control
+    if (char == '\x1b') {
+        print_handled.* = true;
+
+        _ = getChar();
+
+        char = getChar();
+        switch (char) {
+            // Up arrow
+            'A' => {
+                if (history_cursor.* >= history.list.items.len) return true;
+                history_cursor.* += 1;
+
+                try current_line.*.replaceWith(history.list.items[history.list.items.len - history_cursor.*]);
+
+                return true;
+            },
+            // Down arrow
+            'B' => {
+                if (history_cursor.* > 0) history_cursor.* -= 1;
+
+                current_line.*.contents.shrinkAndFree(0);
+
+                if (history_cursor.* > 0) {
+                    try current_line.*.contents.appendSlice(history.list.items[history.list.items.len - history_cursor.*]);
+                    //try current_line.*.insert(history.list.items[history.list.items.len - history_cursor.*]);
+                }
+
+                curses.restorePosition();
+                curses.clearLine(.right);
+
+                try stdout.print("{s}", .{current_line.*.contents.items});
+                current_line.*.pos = current_line.*.contents.items.len;
+                return true;
+            },
+            'C' => {
+                if (current_line.*.pos < current_line.*.contents.items.len) {
+                    current_line.*.stepForward();
+                }
+
+                return true;
+            },
+            'D' => {
+                current_line.stepBackward();
+
+                return true;
+            },
+            else => {},
+        }
+    }
+
+    // Insert a single UTF-8 codepoint
+    if (!print_handled.*) {
+        var utf8_buf: [4]u8 = undefined;
+        utf8_buf[0] = char;
+
+        const continue_len: u3 = utf8ContinueLen(char);
+        for (utf8_buf[1..][0..continue_len], 1..) |_, idx| {
+            utf8_buf[idx] = getChar();
+        }
+
+        const codepoint = utf8_buf[0 .. continue_len + 1];
+
+        const size = curses.terminalSize();
+        _ = size;
+
+        try current_line.*.insert(codepoint);
+    }
+
+    return true;
 }
 
 pub fn main(arguments: []const core.Argument) core.Error {
@@ -372,11 +534,6 @@ pub fn main(arguments: []const core.Argument) core.Error {
     procedures = std.BufMap.init(allocator);
     defer procedures.deinit();
 
-    procedures.put(
-        "TEST",
-        "print hi",
-    ) catch unreachable;
-
     if (target) |script_path| {
         variables.put(
             "0",
@@ -403,7 +560,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     // Main loop
     while (true) {
-        curses.setTerminalMode(.raw) catch return .unknown_error;
+        interactiveLoop() catch return .unknown_error;
 
         var buf: [3]u8 = undefined;
 
@@ -439,148 +596,19 @@ pub fn main(arguments: []const core.Argument) core.Error {
         };
 
         var restart = false;
+        var should_continue = true;
 
-        while (true) {
+        while (should_continue) {
             var print_handled = false;
 
-            var char = getChar();
-
-            if (char == '\n') {
-                stdout.print("\n", .{}) catch return .unknown_error;
-                print_prompt = true;
-                current_line.pos = 0;
-
-                if (current_line.contents.items.len == 0) break;
-                if (std.mem.eql(
-                    u8,
-                    current_line.contents.items,
-                    history.last() orelse "",
-                )) break;
-
-                history.append(
-                    history.allocator.dupe(u8, current_line.contents.items) catch return .unknown_error,
-                ) catch return .unknown_error;
-
-                break;
-            }
-
-            // Ctrl+l
-            if (char == '\x0c') {
-                _ = modules.clear.main(&.{});
-                print_prompt = true;
-                restart = true;
-                break;
-            }
-
-            print_prompt = false;
-
-            // Backspace
-            if (char == '\x7f') {
-                print_handled = true;
-                if (current_line.pos > 0) {
-                    current_line.backspace();
-                }
-            }
-
-            if (char == '\t') {
-                print_handled = true;
-                current_line.autoFinishWord(
-                    allocator,
-                ) catch unreachable;
-            }
-
-            // ANSI control
-            if (char == '\x1b') {
-                print_handled = true;
-
-                _ = getChar();
-
-                char = getChar();
-                switch (char) {
-                    // Up arrow
-                    'A' => {
-                        if (history_cursor >= history.list.items.len) continue;
-                        history_cursor += 1;
-
-                        current_line.replaceWith(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
-
-                        continue;
-                    },
-                    // Down arrow
-                    'B' => {
-                        //if (history_cursor <= 1) continue;
-                        if (history_cursor > 0) history_cursor -= 1;
-
-                        current_line.contents.shrinkAndFree(0);
-
-                        if (history_cursor > 0) {
-                            current_line.contents.appendSlice(history.list.items[history.list.items.len - history_cursor]) catch return .unknown_error;
-                        }
-
-                        curses.restorePosition();
-                        curses.clearLine(.right);
-
-                        stdout.print("{s}", .{current_line.contents.items}) catch return .unknown_error;
-                        current_line.pos = current_line.contents.items.len;
-                        continue;
-                    },
-                    'C' => {
-                        if (current_line.pos < current_line.contents.items.len) {
-                            const remaining: u3 = utf8ContinueLen(current_line.contents.items[current_line.pos]);
-
-                            curses.move(.right, 1);
-                            current_line.pos += 1 + remaining;
-                        }
-
-                        continue;
-                    },
-                    'D' => {
-                        if (current_line.pos > 0) {
-                            curses.move(.left, 1);
-                            current_line.pos -= 1;
-                        }
-
-                        // Step back to start byte if needed
-                        while (current_line.pos < current_line.contents.items.len and current_line.contents.items.len > 0 and current_line.contents.items[current_line.pos] & 0b1100_0000 == 0b1000_0000) {
-                            current_line.pos -= 1;
-                        }
-
-                        continue;
-                    },
-                    else => {},
-                }
-            }
-
-            // Insert a single codepoint
-            if (!print_handled) {
-                var utf8_buf: [4]u8 = undefined;
-                utf8_buf[0] = char;
-
-                const continue_len: u3 = utf8ContinueLen(char);
-                for (utf8_buf[1..][0..continue_len], 1..) |_, idx| {
-                    utf8_buf[idx] = getChar();
-                }
-
-                const codepoint = utf8_buf[0 .. continue_len + 1];
-
-                const size = curses.terminalSize();
-                _ = size;
-
-                //  const pos = curses.cursorPosition() catch unreachable;
-                // _ = pos;
-                //if ()
-
-                for (codepoint, 0..) |byte, idx| {
-                    _ = current_line.contents.insert(
-                        current_line.pos + idx,
-                        byte,
-                    ) catch return .unknown_error;
-                }
-
-                curses.insert(codepoint);
-
-                current_line.pos += continue_len + 1;
-            }
+            should_continue = handleInput(
+                allocator,
+                &print_prompt,
+                &current_line,
+                &restart,
+                &history_cursor,
+                &print_handled,
+            ) catch unreachable;
         }
 
         if (restart) continue;
