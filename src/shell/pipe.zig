@@ -18,7 +18,7 @@ pub const ChainRet = struct {
 
     // The index of the command that failed (if any)
     // This should only be read if `exit_code` > 0
-    idx: usize,
+    idx: usize = 0,
 
     pub const Status = packed struct(u16) {
         signal: core.Signal,

@@ -2,7 +2,6 @@ const std = @import("std");
 const posix = std.posix;
 const SIG = posix.SIG;
 pub const modules = @import("modules.zig");
-//pub const usage_print = @import("usage_print.zig").usage_print;
 
 /// How a module should be executed when called inside the shell
 pub const ExecMode = enum {
@@ -66,7 +65,7 @@ pub fn genericMain(
     comptime mainFn: fn ([]const Argument) anyerror!void,
 ) fn ([]const Argument) Error {
     return struct {
-        pub fn main(arguments: []const Argument) Error {
+        pub fn mainImpl(arguments: []const Argument) Error {
             mainFn(arguments) catch |err| {
                 return switch (err) {
                     error.NoSpaceLeft => .no_space_left,
@@ -96,7 +95,7 @@ pub fn genericMain(
 
             return .success;
         }
-    }.main;
+    }.mainImpl;
 }
 
 pub const Module = struct {
@@ -178,8 +177,7 @@ pub fn main() !void {
     if (module_list.get(basename)) |mod| {
         if (print_help) {
             try printHelp(basename, mod.help);
-            //return;
-            unreachable;
+            return;
         }
 
         _ = mod.main(arguments.items[1..]);
@@ -235,7 +233,6 @@ pub const ArgumentParser = struct {
             };
         }
 
-        //switch (arg[it.idx]) {
         switch (arg[1]) {
             '-' => {
                 it.state = .flags_ended;

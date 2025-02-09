@@ -174,13 +174,18 @@ const Line = struct {
 // Re-allocs a command and converts it to a module if needed
 pub fn processCommand(allocator: std.mem.Allocator, command: Command) !Command {
     // Convert to module command if it exists
-    if (core.module_list.get(command.system.name)) |_| {
+    if (core.module_list.get(command.system.name)) |module| {
         // TODO free
         var mod_args = std.ArrayList(core.Argument).init(allocator);
 
         var mod_it = core.ArgumentParser.init(command.system.arguments);
 
         while (mod_it.next()) |arg| {
+            if (arg == .option and arg.option[1] == 'h') {
+                try core.printHelp(command.system.name, module.help);
+                return error.HelpPrinted;
+            }
+
             try mod_args.append(arg);
         }
 
@@ -237,10 +242,17 @@ pub fn runLine(
     while (try it.next()) |entry| {
         if (entry != .command) continue;
 
-        const command = try processCommand(
+        const command = processCommand(
             arena_allocator,
             entry.command,
-        );
+        ) catch |err| {
+            switch (err) {
+                error.HelpPrinted => {
+                    return .{ .ret = .success };
+                },
+                else => return err,
+            }
+        };
 
         try pipe_line.append(command);
     }
@@ -376,7 +388,7 @@ fn handleInput(
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
-    var char = getChar();
+    var char = readCodepoint() catch unreachable;
 
     switch (char) {
         '\n' => {
@@ -428,7 +440,7 @@ fn handleInput(
 
         _ = getChar();
 
-        char = getChar();
+        char = readCodepoint() catch unreachable;
         switch (char) {
             // Up arrow
             'A' => {
@@ -475,20 +487,13 @@ fn handleInput(
 
     // Insert a single UTF-8 codepoint
     if (!print_handled.*) {
-        var utf8_buf: [4]u8 = undefined;
-        utf8_buf[0] = char;
-
-        const continue_len: u3 = utf8ContinueLen(char);
-        for (utf8_buf[1..][0..continue_len], 1..) |_, idx| {
-            utf8_buf[idx] = getChar();
-        }
-
-        const codepoint = utf8_buf[0 .. continue_len + 1];
+        var buf: [4]u8 = undefined;
+        const len = std.unicode.utf8Encode(char, &buf) catch unreachable;
 
         const size = curses.terminalSize();
         _ = size;
 
-        try current_line.*.insert(codepoint);
+        try current_line.*.insert(buf[0..len]);
     }
 
     return true;
@@ -696,4 +701,19 @@ fn getChar() u8 {
     };
 
     return buf[0];
+}
+
+fn readCodepoint() !u21 {
+    const char = getChar();
+
+    var utf8_buf: [4]u8 = undefined;
+    utf8_buf[0] = char;
+
+    const continue_len: u3 = utf8ContinueLen(char);
+
+    for (utf8_buf[1..][0..continue_len], 1..) |_, idx| {
+        utf8_buf[idx] = getChar();
+    }
+
+    return std.unicode.utf8Decode(utf8_buf[0 .. continue_len + 1]);
 }
