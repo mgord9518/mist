@@ -14,25 +14,29 @@ pub const help = core.Help{
 var previous_dir: ?[]const u8 = null;
 var previous_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
-pub fn main(arguments: []const core.Argument) core.Error {
+pub const main = core.genericMain(realMain);
+
+fn realMain(arguments: []const core.Argument) !void {
+
+    //pub fn main(arguments: []const core.Argument) core.Error {
     const cwd = std.fs.cwd();
 
     const home = std.posix.getenv("HOME") orelse "";
 
     if (arguments.len == 0) {
-        previous_dir = std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home}) catch return .unknown_error;
+        previous_dir = try std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home}); //catch return .unknown_error;
 
         @memcpy(previous_dir_buf[0..shell.logical_path.len], shell.logical_path);
         previous_dir = previous_dir_buf[0..shell.logical_path.len];
 
-        std.posix.chdir(home) catch |err| {
-            return switch (err) {
-                error.FileNotFound => .file_not_found,
-                else => return .unknown_error,
-            };
-        };
+        try std.posix.chdir(home); //catch |err| {
+        //            return switch (err) {
+        //                error.FileNotFound => .file_not_found,
+        //                else => return .unknown_error,
+        //            };
+        //        };
 
-        return .success;
+        return;
     }
 
     if (std.mem.eql(u8, arguments[0].positional, "-")) {
@@ -45,37 +49,37 @@ pub fn main(arguments: []const core.Argument) core.Error {
             @memcpy(shell.logical_path_buf[0..temp.len], temp);
             shell.logical_path = shell.logical_path_buf[0..temp.len];
 
-            std.posix.chdir(temp) catch |err| {
-                return switch (err) {
-                    error.FileNotFound => .file_not_found,
-                    else => unreachable,
-                };
-            };
+            try std.posix.chdir(temp); // catch |err| {
+            //                return switch (err) {
+            //                    error.FileNotFound => .file_not_found,
+            //                    else => unreachable,
+            //                };
+            //            };
         }
 
-        return .success;
+        return;
     }
 
     const sub_dir = arguments[0].positional;
 
-    var dir = cwd.openDir(sub_dir, .{}) catch {
-        return .unknown_error;
-    };
+    var dir = try cwd.openDir(sub_dir, .{}); // catch {
+    //        return .unknown_error;
+    //    };
 
     @memcpy(previous_dir_buf[0..shell.logical_path.len], shell.logical_path);
     previous_dir = previous_dir_buf[0..shell.logical_path.len];
 
     resolveLogicalPath(sub_dir) catch unreachable;
 
-    dir.setAsCwd() catch |err| {
-        switch (err) {
-            error.NotDir => return .not_dir,
-            error.AccessDenied => return .access_denied,
-            else => return .unknown_error,
-        }
-    };
+    try dir.setAsCwd(); //catch |err| {
+    //        switch (err) {
+    //            error.NotDir => return .not_dir,
+    //            error.AccessDenied => return .access_denied,
+    //            else => return .unknown_error,
+    //        }
+    //    };
 
-    return .success;
+    return;
 }
 
 fn resolveLogicalPath(sub_dir: []const u8) !void {

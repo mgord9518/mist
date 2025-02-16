@@ -3,16 +3,20 @@ const posix = std.posix;
 const core = @import("../main.zig");
 const shell = @import("../shell.zig");
 const time = @import("../time.zig");
-const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .function;
 pub const no_display = true;
 
-const base_color = fg(.default);
+//const base_color = fg(.default);
 
-const prompt = base_color ++ "┌┤ {s}{s} " ++
-    base_color ++ "│ {s}" ++
-    base_color ++ " │\n└─" ++ fg(.default) ++ " ";
+const prompt = std.fmt.comptimePrint(
+    \\{0}┌┤ {{s}}{{s}} {0}│ {{s}}{0} │
+    \\└─{0} 
+, .{core.ColorName.default});
+
+//const prompt = base_color ++ "┌┤ {s}{s} " ++
+//    base_color ++ "│ {s}" ++
+//    base_color ++ " │\n└─" ++ fg(.default) ++ " ";
 
 pub fn main(_: []const core.Argument) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -48,8 +52,10 @@ pub fn main(_: []const core.Argument) core.Error {
     var in_home = false;
 
     if (path.len == 1) {
-        _ = colorized_path.writer().write(fg(.bright_blue)) catch unreachable;
-        _ = colorized_path.writer().write("/") catch unreachable;
+        _ = colorized_path.writer().print(
+            "{}/",
+            .{core.ColorName.bright_blue},
+        ) catch unreachable;
     }
 
     if (path.len >= home.len and std.mem.eql(u8, path[0..home.len], home)) {
@@ -64,12 +70,16 @@ pub fn main(_: []const core.Argument) core.Error {
             break :blk true;
         };
 
-        const color = if (is_link2) fg(.cyan) else fg(.bright_blue);
+        const color = if (is_link2) core.ColorName.cyan else core.ColorName.bright_blue;
 
         in_home = true;
 
-        _ = colorized_path.writer().write(color) catch unreachable;
-        _ = colorized_path.writer().write("~") catch unreachable;
+        _ = colorized_path.writer().print(
+            "{}~",
+            .{color},
+        ) catch unreachable;
+        //_ = colorized_path.writer().write(color) catch unreachable;
+        //  _ = colorized_path.writer().write("~") catch unreachable;
         path = path[home.len..];
     }
 
@@ -92,14 +102,22 @@ pub fn main(_: []const core.Argument) core.Error {
             break :blk true;
         };
 
-        const color = if (is_link2) fg(.cyan) else fg(.bright_blue);
+        const color = if (is_link2) core.ColorName.cyan else core.ColorName.bright_blue;
 
-        _ = colorized_path.writer().write(comptime fg(.bright_blue) ++ "/") catch unreachable;
-        _ = colorized_path.writer().write(color) catch unreachable;
-        _ = colorized_path.writer().write(name.name) catch unreachable;
+        _ = colorized_path.writer().print(
+            "{}/{}{s}",
+            .{
+                core.ColorName.bright_blue,
+                color,
+                name.name,
+            },
+        ) catch unreachable;
+        //        _ = colorized_path.writer().write(comptime fg(.bright_blue) ++ "/") catch unreachable;
+        //        _ = colorized_path.writer().write(color) catch unreachable;
+        //        _ = colorized_path.writer().write(name.name) catch unreachable;
     }
 
-    const color = if (is_link) fg(.cyan) else fg(.bright_blue);
+    const color = if (is_link) core.ColorName.cyan else core.ColorName.bright_blue;
     const exit_code = shell.variables.get("mist.exit_code") orelse unreachable;
 
     var code_buf: [4096]u8 = undefined;
@@ -110,26 +128,27 @@ pub fn main(_: []const core.Argument) core.Error {
         if (false) {
             break :blk std.fmt.bufPrint(
                 &code_buf,
-                fg(.magenta) ++ "{s}",
-                .{name},
+                "{}{s}",
+                .{ core.ColorName.magenta, name },
             ) catch unreachable;
         }
 
         break :blk std.fmt.bufPrint(
             &code_buf,
-            fg(.red) ++ "{?s} : {s}",
+            "{}{?s} : {s}",
             .{
+                core.ColorName.red,
                 shell.variables.get("mist.status.index"),
                 name,
             },
         ) catch unreachable;
     } else if (std.mem.eql(u8, "0", exit_code)) blk: {
-        break :blk comptime fg(.green) ++ "ok";
+        break :blk std.fmt.comptimePrint("{}ok", .{core.ColorName.green});
     } else blk: {
         break :blk std.fmt.bufPrint(
             &code_buf,
-            fg(.red) ++ "error code {s}",
-            .{exit_code},
+            "{}error code {s}",
+            .{ core.ColorName.red, exit_code },
         ) catch unreachable;
     };
 

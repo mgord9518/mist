@@ -18,8 +18,9 @@ pub fn main(_: []const core.Argument) core.Error {
         if (mod.no_display) continue;
 
         //stdout.print(core.colors.module ++ "{s:>8}" ++
-        stdout.print(core.colors.module ++ "{s}" ++
+        stdout.print("{}{s}" ++
             fg(.default) ++ ": \n  ", .{
+            core.colors.module,
             k,
             //mod.help.?.description,
         }) catch {};

@@ -266,11 +266,11 @@ pub fn printHelp(name: []const u8, h: ?Help) !void {
     const stdout = stdout_file.writer();
 
     try stdout.print(
-        \\{2s}usage{1s}: {0s} 
+        \\{2}usage{1}: {0s} 
     , .{
         name,
-        fg(.default),
-        fg(.yellow),
+        ColorName.default,
+        ColorName.yellow,
     });
 
     try usagePrint(stdout, help.usage);
@@ -282,14 +282,14 @@ pub fn printHelp(name: []const u8, h: ?Help) !void {
             \\{1s}options{0s}:
             \\
         , .{
-            fg(.default),
-            fg(.yellow),
+            ColorName.default,
+            ColorName.yellow,
         });
 
         for (options) |option| {
             try stdout.print("{0s}  {1s}-{2c}{0s}: {3s}\n", .{
-                fg(.default),
-                fg(.cyan),
+                ColorName.default,
+                ColorName.cyan,
                 option.flag,
                 option.description,
             });
@@ -299,7 +299,7 @@ pub fn printHelp(name: []const u8, h: ?Help) !void {
     }
 }
 
-const ColorName = enum(comptime_int) {
+pub const ColorName = enum(u8) {
     reset = 0,
     default = 39,
 
@@ -320,6 +320,21 @@ const ColorName = enum(comptime_int) {
     bright_magenta = 95,
     bright_cyan = 96,
     bright_white = 97,
+
+    pub fn format(
+        self: ColorName,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        return out_stream.print(
+            "\x1b[;{d}m",
+            .{@intFromEnum(self)},
+        );
+    }
 };
 
 pub fn fg(comptime color: ColorName) [:0]const u8 {
@@ -383,16 +398,17 @@ pub fn enableSig(signal: Signal) !void {
 }
 
 pub const colors = struct {
-    pub const required = fg(.yellow);
-    pub const optional = fg(.cyan);
-    pub const module = fg(.green);
+    pub const required = ColorName.yellow;
+    pub const optional = ColorName.cyan;
+    pub const module = ColorName.green;
 
     pub const fs = struct {
-        pub const file = fg(.default);
-        pub const directory = fg(.bright_blue);
-        pub const sym_link = fg(.cyan);
-        pub const device = fg(.yellow);
-        pub const executable = fg(.bright_green);
+        pub const file = ColorName.default;
+        pub const directory = ColorName.bright_blue;
+        pub const broken_sym_link = ColorName.bright_red;
+        pub const sym_link = ColorName.cyan;
+        pub const device = ColorName.yellow;
+        pub const executable = ColorName.bright_green;
     };
 };
 
@@ -400,22 +416,23 @@ pub fn usagePrint(writer: anytype, in: []const u8) !void {
     var in_grave = false;
 
     for (in) |byte| {
-        _ = try writer.write(switch (byte) {
-            '<' => "<" ++ colors.required,
-            '>' => comptime fg(.default) ++ ">",
-            '[' => "[" ++ colors.optional,
-            ']' => comptime fg(.default) ++ "]",
-            '`' => blk: {
+        switch (byte) {
+            '<' => try writer.print("<{}", .{colors.required}),
+            '>', ']' => try writer.print("{}{c}", .{ ColorName.default, byte }),
+            '[' => try writer.print("[{}", .{colors.optional}),
+            '`' => {
                 in_grave = !in_grave;
 
                 if (in_grave) {
-                    break :blk "`" ++ colors.module;
+                    try writer.print("`{}", .{colors.module});
                 } else {
-                    break :blk comptime fg(.default) ++ "`";
+                    try writer.print("{}`", .{ColorName.default});
                 }
             },
 
-            else => &[_]u8{byte},
-        });
+            else => {
+                _ = try writer.write(&.{byte});
+            },
+        }
     }
 }
