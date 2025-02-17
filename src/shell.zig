@@ -32,19 +32,18 @@ pub var variables: std.BufMap = undefined;
 pub var procedures: std.BufMap = undefined;
 pub var history: History = undefined;
 
-pub const Command = union(enum) {
-    /// Module; may be a shell builtin or any other command implemented in the
-    /// `src/modules` directory
-    module: struct {
-        name: []const u8,
-        arguments: []const core.Argument = &.{},
+pub const Command = struct {
+    kind: enum {
+        /// Module; may be a shell builtin or any other command implemented in the
+        /// `src/modules` directory
+        module,
+
+        /// System command; anything that falls under `$PATH`
+        system,
     },
 
-    /// System command; anything that falls under `$PATH`
-    system: struct {
-        name: []const u8,
-        arguments: []const []const u8 = &.{},
-    },
+    name: []const u8,
+    arguments: []const []const u8 = &.{},
 };
 
 const Line = struct {
@@ -171,48 +170,24 @@ const Line = struct {
     }
 };
 
-// Re-allocs a command and converts it to a module if needed
-pub fn processCommand(allocator: std.mem.Allocator, command: Command) !Command {
-    // Convert to module command if it exists
-    if (core.module_list.get(command.system.name)) |module| {
-        // TODO free
-        var mod_args = std.ArrayList(core.Argument).init(allocator);
-
-        var mod_it = core.ArgumentParser.init(command.system.arguments);
-
-        while (mod_it.next()) |arg| {
-            if (arg == .option and arg.option[1] == 'h') {
-                try core.printHelp(command.system.name, module.help);
-                return error.HelpPrinted;
-            }
-
-            try mod_args.append(arg);
-        }
-
-        return .{
-            .module = .{
-                .name = command.system.name,
-                .arguments = mod_args.items,
-            },
-        };
+// Re-allocs a command
+pub fn dupeCommand(allocator: std.mem.Allocator, command: Command) !Command {
+    var kind = command.kind;
+    if (core.module_list.get(command.name)) |_| {
+        kind = .module;
     }
 
-    if (command == .system) {
-        var mod_args = std.ArrayList([]const u8).init(allocator);
+    var mod_args = std.ArrayList([]const u8).init(allocator);
 
-        for (command.system.arguments) |arg| {
-            try mod_args.append(arg);
-        }
-
-        return Command{
-            .system = .{
-                .name = command.system.name,
-                .arguments = mod_args.items,
-            },
-        };
+    for (command.arguments) |arg| {
+        try mod_args.append(arg);
     }
 
-    unreachable;
+    return .{
+        .kind = kind,
+        .name = command.name,
+        .arguments = mod_args.items,
+    };
 }
 
 pub fn runLine(
@@ -242,17 +217,10 @@ pub fn runLine(
     while (try it.next()) |entry| {
         if (entry != .command) continue;
 
-        const command = processCommand(
+        const command = try dupeCommand(
             arena_allocator,
             entry.command,
-        ) catch |err| {
-            switch (err) {
-                error.HelpPrinted => {
-                    return .{ .ret = .success };
-                },
-                else => return err,
-            }
-        };
+        );
 
         try pipe_line.append(command);
     }
@@ -264,7 +232,7 @@ pub fn runLine(
     );
 
     if (interactive and exit_status.ret == .module_exit_failure) {
-        const mod_name = pipe_line.items[exit_status.idx].module.name;
+        const mod_name = pipe_line.items[exit_status.idx].name;
 
         if (exit_status.ret.module_exit_failure == .usage_error) {
             const mod = core.module_list.get(mod_name) orelse unreachable;
@@ -327,7 +295,6 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
 
         const exit_status = runLine(
             allocator,
-            //file.reader(),
             reader,
             line,
             false,
@@ -499,7 +466,7 @@ fn handleInput(
     return true;
 }
 
-pub fn main(arguments: []const core.Argument) core.Error {
+pub fn main(arguments: []const []const u8) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -520,11 +487,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) return .usage_error;
-
-        if (arg == .positional) {
-            target = arg.positional;
-        }
+        target = arg;
     }
 
     logical_path = std.posix.getcwd(

@@ -10,18 +10,16 @@ pub const help = core.Help{
     .usage = "[EXIT_CODE]",
 };
 
-// TODO: specify exit code
-pub fn main(arguments: []const core.Argument) core.Error {
+pub fn main(arguments: []const []const u8) core.Error {
     curses.setTerminalMode(.normal) catch return .unknown_error;
 
     if (arguments.len == 0) std.posix.exit(0);
 
-    if (arguments.len != 1) return .usage_error;
-    if (arguments[0] == .option) return .usage_error;
+    if (arguments.len > 1) return .usage_error;
 
     const target = std.fmt.parseInt(
         u8,
-        arguments[0].positional,
+        arguments[0],
         10,
     ) catch 255;
 

@@ -8,16 +8,18 @@ pub const help = core.Help{
     .usage = "",
 };
 
-pub fn main(_: []const core.Argument) core.Error {
+pub const main = core.genericMain(realMain);
+
+fn realMain(_: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
-    stdout.print("{s}{s}{s}{s}{s}", .{
+    try stdout.print("{s}{s}{s}{s}{s}", .{
         "\x1bc",
         "\x1b(B",
         "\x1b[m",
         "\x1b[J",
         "\x1b[?25h",
-    }) catch {};
+    });
 
-    return .success;
+    return;
 }

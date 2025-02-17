@@ -9,21 +9,36 @@ pub const help = core.Help{
 };
 
 // TODO numeric comparison
-pub fn main(arguments: []const core.Argument) core.Error {
+
+pub const main = core.genericMain(realMain);
+
+fn realMain(argv: []const []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var argument_list = std.ArrayList(core.Argument).init(allocator);
+    defer argument_list.deinit();
+
+    var it = core.ArgumentParser.init(argv);
+    while (it.next()) |entry| {
+        try argument_list.append(entry);
+    }
+    const arguments = argument_list.items;
+
     var current_target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) return .usage_error;
+        if (arg == .option) return error.UsageError;
 
         if (current_target != null and !std.mem.eql(
             u8,
             arg.positional,
             current_target.?,
         )) {
-            return .not_equal;
+            return error.NotEqual;
         }
 
         current_target = arg.positional;
     }
 
-    return .success;
+    return;
 }

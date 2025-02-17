@@ -2,8 +2,6 @@ const std = @import("std");
 const core = @import("../main.zig");
 const fg = core.fg;
 
-const allocator = std.heap.page_allocator;
-
 pub const exec_mode: core.ExecMode = .fork;
 
 pub const help = core.Help{
@@ -23,7 +21,21 @@ const IdType = enum {
     gids,
 };
 
-pub fn main(arguments: []const core.Argument) core.Error {
+pub const main = core.genericMain(realMain);
+
+fn realMain(argv: []const []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var argument_list = std.ArrayList(core.Argument).init(allocator);
+    defer argument_list.deinit();
+
+    var it = core.ArgumentParser.init(argv);
+    while (it.next()) |entry| {
+        try argument_list.append(entry);
+    }
+    const arguments = argument_list.items;
+
     const stdout = std.io.getStdOut().writer();
 
     var id_type: IdType = .none;
@@ -34,7 +46,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
     for (arguments) |arg| {
         if (arg == .positional) {
             // TODO error handling
-            if (username != null) return .usage_error;
+            if (username != null) return error.UsageError;
 
             username = arg.positional;
 
@@ -47,11 +59,11 @@ pub fn main(arguments: []const core.Argument) core.Error {
             'G' => id_type = .gids,
             'n' => print_names = true,
 
-            else => return .usage_error,
+            else => return error.UsageError,
         }
     }
 
-    if (id_type == .none) return .success;
+    if (id_type == .none) return error.UsageError;
 
     const idt = id_type;
 
@@ -61,12 +73,12 @@ pub fn main(arguments: []const core.Argument) core.Error {
         uid = std.os.linux.geteuid();
         gid = std.os.linux.getegid();
     } else {
-        var it = PasswdIterator.init(allocator) catch return .unknown_error;
-        defer it.deinit();
+        var passwd_it = try PasswdIterator.init(allocator);
+        defer passwd_it.deinit();
 
         var found = false;
 
-        while (it.next() catch return .unknown_error) |entry| {
+        while (try passwd_it.next()) |entry| {
             if (std.mem.eql(u8, entry.username, username.?)) {
                 uid = entry.uid;
                 found = true;
@@ -103,39 +115,39 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
         stdout.print("\n", .{}) catch {};
 
-        return .success;
+        return;
     }
 
     if (print_names) {
-        var it = PasswdIterator.init(allocator) catch return .unknown_error;
-        defer it.deinit();
+        var passwd_it = try PasswdIterator.init(allocator);
+        defer passwd_it.deinit();
 
-        while (it.next() catch return .unknown_error) |entry| {
+        while (try passwd_it.next()) |entry| {
             const id = uid;
 
             if (entry.uid != id) continue;
 
-            stdout.print("{s}\n", .{switch (idt) {
+            try stdout.print("{s}\n", .{switch (idt) {
                 .uid => entry.username,
 
                 // TODO
                 .gid => entry.username,
                 else => unreachable,
-            }}) catch unreachable;
+            }});
 
             break;
         }
 
-        return .success;
+        return;
     }
 
-    stdout.print("{d}\n", .{switch (idt) {
+    try stdout.print("{d}\n", .{switch (idt) {
         .uid => uid,
         .gid => gid,
         else => unreachable,
-    }}) catch unreachable;
+    }});
 
-    return .success;
+    return;
 }
 
 const PasswdIterator = struct {
@@ -156,7 +168,7 @@ const PasswdIterator = struct {
         shell: []const u8,
     };
 
-    pub fn init(_: std.mem.Allocator) !PasswdIterator {
+    pub fn init(allocator: std.mem.Allocator) !PasswdIterator {
         return .{
             .list = std.ArrayList(u8).init(allocator),
             .file = try std.fs.cwd().openFile("/etc/passwd", .{}),
@@ -215,7 +227,7 @@ const GroupIterator = struct {
         members: []const []const u8,
     };
 
-    pub fn init(_: std.mem.Allocator) !GroupIterator {
+    pub fn init(allocator: std.mem.Allocator) !GroupIterator {
         return .{
             .list = std.ArrayList(u8).init(allocator),
             .file = try std.fs.cwd().openFile("/etc/group", .{}),

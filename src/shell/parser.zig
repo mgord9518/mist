@@ -87,12 +87,10 @@ pub const SyntaxIterator = struct {
             switch (token) {
                 .string => |string| {
                     if (command == null) {
-                        command = .{
-                            .system = .{ .name = string },
-                        };
+                        command = .{ .kind = .system, .name = string };
                     } else {
                         try it.args.append(string);
-                        command.?.system.arguments = it.args.items[args_off..];
+                        command.?.arguments = it.args.items[args_off..];
                     }
                 },
                 .separator => |sep| {

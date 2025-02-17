@@ -62,10 +62,10 @@ pub const Error = enum(u7) {
 };
 
 pub fn genericMain(
-    comptime mainFn: fn ([]const Argument) anyerror!void,
-) fn ([]const Argument) Error {
+    comptime mainFn: fn ([]const []const u8) anyerror!void,
+) fn ([]const []const u8) Error {
     return struct {
-        pub fn mainImpl(arguments: []const Argument) Error {
+        pub fn mainImpl(arguments: []const []const u8) Error {
             mainFn(arguments) catch |err| {
                 return switch (err) {
                     error.NoSpaceLeft => .no_space_left,
@@ -89,6 +89,8 @@ pub fn genericMain(
                     error.BrokenPipe => .broken_pipe,
                     error.FileNotFound => .file_not_found,
 
+                    error.NotEqual => .not_equal,
+
                     else => .unknown_error,
                 };
             };
@@ -100,7 +102,7 @@ pub fn genericMain(
 
 pub const Module = struct {
     help: ?Help,
-    main: *const fn ([]const Argument) Error,
+    main: *const fn ([]const []const u8) Error,
     exec_mode: ExecMode,
     no_display: bool,
 };
@@ -159,18 +161,7 @@ pub fn main() !void {
         try args.append(std.mem.sliceTo(arg, 0));
     }
 
-    var print_help = false;
-
-    var arguments = std.ArrayList(Argument).init(allocator);
-
-    var it = ArgumentParser.init(args.items);
-    while (it.next()) |entry| {
-        if (entry == .option and entry.option[1] == 'h') {
-            print_help = true;
-        }
-
-        try arguments.append(entry);
-    }
+    const print_help = false;
 
     const basename = std.fs.path.basename(argv0);
 
@@ -180,7 +171,7 @@ pub fn main() !void {
             return;
         }
 
-        _ = mod.main(arguments.items[1..]);
+        _ = mod.main(args.items[1..]);
     } else {
         @panic("Module not found!");
     }

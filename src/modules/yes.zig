@@ -9,7 +9,21 @@ pub const help = core.Help{
     .usage = "[STRING]",
 };
 
-pub fn main(arguments: []const core.Argument) core.Error {
+pub const main = core.genericMain(realMain);
+
+fn realMain(argv: []const []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var argument_list = std.ArrayList(core.Argument).init(allocator);
+    defer argument_list.deinit();
+
+    var it = core.ArgumentParser.init(argv);
+    while (it.next()) |entry| {
+        try argument_list.append(entry);
+    }
+    const arguments = argument_list.items;
+
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
     var buf_writer = std.io.bufferedWriter(stdout);
@@ -17,10 +31,10 @@ pub fn main(arguments: []const core.Argument) core.Error {
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
-        if (arg == .option) return .usage_error;
+        if (arg == .option) return error.UsageError;
 
         if (arg == .positional) {
-            if (target != null) return .usage_error;
+            if (target != null) return error.UsageError;
 
             target = arg.positional;
         }
@@ -33,7 +47,7 @@ pub fn main(arguments: []const core.Argument) core.Error {
         ) catch break;
     }
 
-    buf_writer.flush() catch unreachable;
+    try buf_writer.flush();
 
-    return .success;
+    return;
 }

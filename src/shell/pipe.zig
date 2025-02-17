@@ -70,13 +70,13 @@ pub fn chainCommands(
     // TODO: don't hardcode this
     var heredoc = false;
     var heredoc_string: []const u8 = "END";
-    if (c[0] == .system) {
-        if (std.mem.eql(u8, c[0].system.name, "<<")) {
+    if (c[0].kind == .system) {
+        if (std.mem.eql(u8, c[0].name, "<<")) {
             heredoc = true;
             commands = c[1..];
 
-            if (c[0].system.arguments.len == 1) {
-                heredoc_string = c[0].system.arguments[0];
+            if (c[0].arguments.len == 1) {
+                heredoc_string = c[0].arguments[0];
             }
         }
     }
@@ -113,11 +113,11 @@ pub fn chainCommands(
     defer pid_map.deinit();
 
     for (commands, 0..) |command, idx| {
-        if (command != .system) {
-            if (core.module_list.get(command.module.name)) |mod| {
+        if (command.kind != .system) {
+            if (core.module_list.get(command.name)) |mod| {
                 if (mod.exec_mode == .function) {
                     // TODO: fix with piping
-                    const exit_code = mod.main(command.module.arguments);
+                    const exit_code = mod.main(command.arguments);
 
                     return .{
                         .idx = 0,
@@ -171,24 +171,24 @@ pub fn chainCommands(
         var err_pipe_contents: []const u8 = "\x00";
 
         // Execute command
-        switch (command) {
+        switch (command.kind) {
             .module => {
                 try posix.dup2(error_pipes[idx][1], 4);
 
                 // TODO: error
                 const mod = core.module_list.get(
-                    command.module.name,
+                    command.name,
                 ) orelse unreachable;
 
                 exit_code = @intFromEnum(
-                    mod.main(command.module.arguments),
+                    mod.main(command.arguments),
                 );
             },
             .system => {
                 var argv = std.ArrayList([]const u8).init(a);
 
-                try argv.append(command.system.name);
-                try argv.appendSlice(command.system.arguments);
+                try argv.append(command.name);
+                try argv.appendSlice(command.arguments);
 
                 const err = std.process.execv(
                     a,
@@ -291,7 +291,7 @@ pub fn chainCommands(
         ret.ret = if (@intFromEnum(status.signal) != 0) blk: {
             break :blk .{ .signal = status.signal };
         } else blk: {
-            if (commands[idx] == .system) {
+            if (commands[idx].kind == .system) {
                 break :blk .{ .exit_code = status.exit_code };
             } else {
                 if (status.exit_code == 0) {

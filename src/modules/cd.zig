@@ -16,25 +16,30 @@ var previous_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
 pub const main = core.genericMain(realMain);
 
-fn realMain(arguments: []const core.Argument) !void {
+fn realMain(argv: []const []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
-    //pub fn main(arguments: []const core.Argument) core.Error {
+    var argument_list = std.ArrayList(core.Argument).init(allocator);
+    defer argument_list.deinit();
+
+    var it = core.ArgumentParser.init(argv);
+    while (it.next()) |entry| {
+        try argument_list.append(entry);
+    }
+    const arguments = argument_list.items;
+
     const cwd = std.fs.cwd();
 
     const home = std.posix.getenv("HOME") orelse "";
 
     if (arguments.len == 0) {
-        previous_dir = try std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home}); //catch return .unknown_error;
+        previous_dir = try std.fmt.bufPrint(&previous_dir_buf, "{s}", .{home});
 
         @memcpy(previous_dir_buf[0..shell.logical_path.len], shell.logical_path);
         previous_dir = previous_dir_buf[0..shell.logical_path.len];
 
-        try std.posix.chdir(home); //catch |err| {
-        //            return switch (err) {
-        //                error.FileNotFound => .file_not_found,
-        //                else => return .unknown_error,
-        //            };
-        //        };
+        try std.posix.chdir(home);
 
         return;
     }
@@ -49,12 +54,7 @@ fn realMain(arguments: []const core.Argument) !void {
             @memcpy(shell.logical_path_buf[0..temp.len], temp);
             shell.logical_path = shell.logical_path_buf[0..temp.len];
 
-            try std.posix.chdir(temp); // catch |err| {
-            //                return switch (err) {
-            //                    error.FileNotFound => .file_not_found,
-            //                    else => unreachable,
-            //                };
-            //            };
+            try std.posix.chdir(temp);
         }
 
         return;
@@ -62,22 +62,14 @@ fn realMain(arguments: []const core.Argument) !void {
 
     const sub_dir = arguments[0].positional;
 
-    var dir = try cwd.openDir(sub_dir, .{}); // catch {
-    //        return .unknown_error;
-    //    };
+    var dir = try cwd.openDir(sub_dir, .{});
 
     @memcpy(previous_dir_buf[0..shell.logical_path.len], shell.logical_path);
     previous_dir = previous_dir_buf[0..shell.logical_path.len];
 
     resolveLogicalPath(sub_dir) catch unreachable;
 
-    try dir.setAsCwd(); //catch |err| {
-    //        switch (err) {
-    //            error.NotDir => return .not_dir,
-    //            error.AccessDenied => return .access_denied,
-    //            else => return .unknown_error,
-    //        }
-    //    };
+    try dir.setAsCwd();
 
     return;
 }

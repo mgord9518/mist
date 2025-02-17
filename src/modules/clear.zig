@@ -8,7 +8,7 @@ pub const help = core.Help{
     .usage = "",
 };
 
-pub fn main(_: []const core.Argument) core.Error {
+pub fn main(_: []const []const u8) core.Error {
     const stdout = std.io.getStdOut().writer();
 
     stdout.print("\x1bc", .{}) catch return .unknown_error;

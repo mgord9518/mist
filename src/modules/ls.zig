@@ -28,12 +28,21 @@ const Entry = struct {
 
 pub const main = core.genericMain(realMain);
 
-fn realMain(arguments: []const core.Argument) !void {
-    const stdout_file = std.io.getStdOut();
-    const stdout = stdout_file.writer();
-
+fn realMain(argv: []const []const u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
+
+    var argument_list = std.ArrayList(core.Argument).init(allocator);
+    defer argument_list.deinit();
+
+    var it = core.ArgumentParser.init(argv);
+    while (it.next()) |entry| {
+        try argument_list.append(entry);
+    }
+    const arguments = argument_list.items;
+
+    const stdout_file = std.io.getStdOut();
+    const stdout = stdout_file.writer();
 
     var long = false;
     var single_column = false;
@@ -104,8 +113,8 @@ fn realMain(arguments: []const core.Argument) !void {
         }
 
         var longest: usize = 0;
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
+        var dir_it = dir.iterate();
+        while (try dir_it.next()) |entry| {
             if (!show_hidden and entry.name[0] == '.') continue;
 
             const file_name = try allocator.dupe(u8, entry.name);

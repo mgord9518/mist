@@ -18,7 +18,7 @@ const prompt = std.fmt.comptimePrint(
 //    base_color ++ "│ {s}" ++
 //    base_color ++ " │\n└─" ++ fg(.default) ++ " ";
 
-pub fn main(_: []const core.Argument) core.Error {
+pub fn main(_: []const []const u8) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
