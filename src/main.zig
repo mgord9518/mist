@@ -17,48 +17,52 @@ pub const ExecMode = enum {
     function,
 };
 
-/// Shared exit codes
-/// Any error that can reasonably be assumed to be generic should be here
+/// As these will be used in the future for plugins, the numeric values
+/// should really try not to change unless there is a good reason. If the
+/// values do change, MIST should keep a revision history so that old
+/// plugins can still have their errors shown correctly
 pub const Error = enum(u7) {
     success = 0,
     unknown_error = 1,
     usage_error = 2,
 
     // Filesystem
-    file_not_found,
-    access_denied,
-    cwd_not_found,
-    name_too_long,
-    not_dir,
-    not_file,
-    sym_link_loop,
+    file_not_found = 16,
+    access_denied = 17,
+    cwd_not_found = 18,
+    name_too_long = 19,
+    not_dir = 20,
+    not_file = 21,
+    sym_link_loop = 22,
 
     // IO
-    read_failure,
-    write_failure,
-    input_output,
-    broken_pipe,
+    read_failure = 32,
+    write_failure = 33,
+    input_output = 34,
+    broken_pipe = 35,
 
     // Variables
-    invalid_variable,
-    invalid_env_variable,
+    invalid_variable = 48,
+    invalid_env_variable = 49,
 
     // System
-    out_of_memory,
-    no_space_left,
-    not_equal,
-    system_resources,
+    out_of_memory = 64,
+    no_space_left = 65,
+    not_equal = 66,
+    system_resources = 67,
 
     // Encoding/ compression
-    corrupt_input,
+    corrupt_input = 80,
 
     // Misc
-    false,
-    invalid_argument,
+    false = 96,
+    invalid_argument = 97,
 
     // Exec
     command_cannot_execute = 126,
     command_not_found = 127,
+
+    _,
 };
 
 pub fn genericMain(
@@ -107,6 +111,13 @@ pub const Module = struct {
     no_display: bool,
 };
 
+pub const PluginMain = *const fn (
+    argc: usize,
+    argv: [*]?[*]const u8,
+    argvc: [*]usize,
+) callconv(.C) u8;
+//pub const PluginMain = *const fn () callconv(.C) usize;
+
 pub const module_list = blk: {
     const mod_decls = @typeInfo(modules).Struct.decls;
 
@@ -130,10 +141,12 @@ pub const module_list = blk: {
     break :blk std.StaticStringMap(Module).initComptime(list);
 };
 
+pub var plugin_list: std.StringHashMap(PluginMain) = undefined;
+
 pub const Help = struct {
     description: []const u8,
     usage: []const u8,
-    options: ?[]const Help.Option = null,
+    options: ?[]const Option = null,
 
     // These are simply for printing the help menu
     // all options must be parsed by the module itself
@@ -143,15 +156,37 @@ pub const Help = struct {
     };
 };
 
+const PluginHelp = extern struct {
+    description: String,
+    usage: String,
+    options: Options,
+
+    const Options = extern struct {
+        len: u32,
+        ptr: [*]const Option,
+    };
+
+    const Option = struct {
+        flag: u8,
+        description: String,
+    };
+
+    const String = extern struct {
+        len: u32,
+        ptr: [*]const u8,
+    };
+};
+
 pub const Argument = union(enum) {
     positional: []const u8,
 
-    // Done this way to make converting between []Argument and [][]u8 cheap
-    option: *const [2]u8,
+    option: u8,
 };
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
+
+    try init(allocator);
 
     const argv = std.os.argv;
     const argv0 = std.mem.sliceTo(argv[0], 0);
@@ -175,6 +210,14 @@ pub fn main() !void {
     } else {
         @panic("Module not found!");
     }
+}
+
+fn init(allocator: std.mem.Allocator) !void {
+    plugin_list = std.StringHashMap(PluginMain).init(allocator);
+}
+
+fn deinit() !void {
+    plugin_list.deinit();
 }
 
 pub const ArgumentParser = struct {
@@ -236,9 +279,9 @@ pub const ArgumentParser = struct {
                     return it.next();
                 }
 
-                defer it.idx += 1;
+                it.idx += 1;
                 return .{
-                    .option = it.arguments[it.current_arg][it.idx..][0..2],
+                    .option = it.arguments[it.current_arg][it.idx],
                 };
             },
         }

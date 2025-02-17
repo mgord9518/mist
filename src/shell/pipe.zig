@@ -175,14 +175,26 @@ pub fn chainCommands(
             .module => {
                 try posix.dup2(error_pipes[idx][1], 4);
 
-                // TODO: error
-                const mod = core.module_list.get(
-                    command.name,
-                ) orelse unreachable;
+                if (core.module_list.get(command.name)) |mod| {
+                    exit_code = @intFromEnum(mod.main(command.arguments));
+                }
+            },
+            .plugin => {
+                if (core.plugin_list.get(command.name)) |pluginMain| {
+                    var argv = try std.ArrayList(?[*]const u8).initCapacity(a, command.arguments.len + 1);
+                    var argcv = try std.ArrayList(usize).initCapacity(a, command.arguments.len + 1);
+                    defer argv.deinit();
+                    defer argcv.deinit();
 
-                exit_code = @intFromEnum(
-                    mod.main(command.arguments),
-                );
+                    try argv.append(command.name.ptr);
+                    try argcv.append(command.name.len);
+                    for (command.arguments) |arg| {
+                        try argv.append(arg.ptr);
+                        try argcv.append(arg.len);
+                    }
+
+                    exit_code = pluginMain(command.arguments.len + 1, argv.items.ptr, argcv.items.ptr);
+                }
             },
             .system => {
                 var argv = std.ArrayList([]const u8).init(a);

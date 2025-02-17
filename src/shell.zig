@@ -34,9 +34,11 @@ pub var history: History = undefined;
 
 pub const Command = struct {
     kind: enum {
-        /// Module; may be a shell builtin or any other command implemented in the
-        /// `src/modules` directory
+        /// Module; source-only
         module,
+
+        /// Plugin; loaded at runtime
+        plugin,
 
         /// System command; anything that falls under `$PATH`
         system,
@@ -175,6 +177,10 @@ pub fn dupeCommand(allocator: std.mem.Allocator, command: Command) !Command {
     var kind = command.kind;
     if (core.module_list.get(command.name)) |_| {
         kind = .module;
+    }
+
+    if (core.plugin_list.get(command.name)) |_| {
+        kind = .plugin;
     }
 
     var mod_args = std.ArrayList([]const u8).init(allocator);
@@ -638,7 +644,7 @@ pub fn statusName(
         .module_exit_failure => |err| {
             if (err == .success) return null;
 
-            return @tagName(err);
+            return std.enums.tagName(@TypeOf(err), err) orelse "unknown_error";
         },
         .exit_code => null,
     };

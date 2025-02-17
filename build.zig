@@ -11,13 +11,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    //    const base91_dep = b.dependency("base91", .{
-    //        .target = target,
-    //        .optimize = optimize,
-    //    });
+    // Currently needed to load plugins until
+    // <https://github.com/ziglang/zig/issues/21196> is resolved
     //
-    //    const base91_module = base91_dep.module("base91");
-    //    exe.root_module.addImport("base91", base91_module);
+    // Well, it does partially work without libc, it just only seems to load
+    // libraries built with Zig which are compiled with a release mode?
+    // Debug builds crash... let's wait until DynLib becomes more stable and
+    // plugins should be able to be written in anything supporting C ABI
+    exe.linkLibC();
 
     if (false) {
         const zware_dep = b.dependency("zware", .{

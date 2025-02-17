@@ -53,7 +53,7 @@ fn realMain(argv: []const []const u8) !void {
             continue;
         }
 
-        switch (arg.option[0]) {
+        switch (arg.option) {
             'u' => id_type = .uid,
             'g' => id_type = .gid,
             'G' => id_type = .gids,

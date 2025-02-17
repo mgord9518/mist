@@ -54,7 +54,7 @@ fn realMain(argv: []const []const u8) !void {
     defer targets.deinit();
 
     for (arguments) |arg| {
-        if (arg == .option) switch (arg.option[1]) {
+        if (arg == .option) switch (arg.option) {
             'a' => show_hidden = true,
             'l' => long = true,
             'U' => do_sort = false,

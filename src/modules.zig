@@ -8,6 +8,7 @@ pub const id = @import("modules/id.zig");
 pub const yes = @import("modules/yes.zig");
 pub const reset = @import("modules/reset.zig");
 pub const ls = @import("modules/ls.zig");
+pub const load_plugin = @import("modules/load_plugin.zig");
 //pub const print = @import("modules/print.zig");
 //pub const getenv = @import("modules/getenv.zig");
 //pub const time = @import("modules/time.zig");
