@@ -1,17 +1,29 @@
 const std = @import("std");
 
-pub fn main() !void {
-    return;
-}
-
-export fn _MIST_PLUGIN_1_0_MAIN(argc: usize, argv: [*][*:0]const u8, argvc: [*:0]usize) u8 {
+export fn _MIST_PLUGIN_1_0_MAIN(
+    arg_count: usize,
+    arg_pointers: [*][*:0]const u8,
+    arg_pointer_sizes: [*:0]usize,
+) u8 {
     std.debug.print("Hello from Zig!\n", .{});
 
-    std.debug.print("My parsed arguments are: ", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
-    for (argv[0..argc], 0..) |arg, idx| {
-        std.debug.print("{s},", .{arg[0..argvc[idx]]});
+    var arguments = allocator.alloc([]const u8, arg_count) catch unreachable;
+    defer allocator.free(arguments);
+
+    for (arg_pointers[0..arg_count], 0..) |arg, idx| {
+        arguments[idx] = arg[0..arg_pointer_sizes[idx]];
     }
 
-    return 69;
+    std.debug.print("My arguments are: ", .{});
+
+    for (arguments) |arg| {
+        std.debug.print("{s}, ", .{arg});
+    }
+
+    std.debug.print("\n", .{});
+
+    return 0;
 }
