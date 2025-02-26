@@ -5,5 +5,6 @@ pkgs.mkShell {
     zig_0_13
     go
     rustc
+    gnumake
   ];
 }

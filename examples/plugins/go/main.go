@@ -6,10 +6,10 @@ import (
     "unsafe"
 )
 
-//export _MIST_PLUGIN_1_0_MAIN
-func _MIST_PLUGIN_1_0_MAIN(
-    argCount C.size_t,
-    argPointers **C.char,
+//export _MIST_PLUGIN_0_0_MAIN
+func _MIST_PLUGIN_0_0_MAIN(
+    argCount         C.size_t,
+    argPointers    **C.char,
     argPointerSizes *C.size_t,
 ) uint8 {
     fmt.Println("Hello from Go!")

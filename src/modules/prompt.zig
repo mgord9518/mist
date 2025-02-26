@@ -7,16 +7,10 @@ const time = @import("../time.zig");
 pub const exec_mode: core.ExecMode = .function;
 pub const no_display = true;
 
-//const base_color = fg(.default);
-
-const prompt = std.fmt.comptimePrint(
-    \\{0}┌┤ {{s}}{{s}} {0}│ {{s}}{0} │
+const prompt = std.fmt.comptimePrint("{0}" ++
+    \\┌┤ {{s}}{{s}} {0}│ {{s}}{0} │
     \\└─{0} 
 , .{core.ColorName.default});
-
-//const prompt = base_color ++ "┌┤ {s}{s} " ++
-//    base_color ++ "│ {s}" ++
-//    base_color ++ " │\n└─" ++ fg(.default) ++ " ";
 
 pub fn main(_: []const []const u8) core.Error {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -51,13 +45,6 @@ pub fn main(_: []const []const u8) core.Error {
 
     var in_home = false;
 
-    if (path.len == 1) {
-        _ = colorized_path.writer().print(
-            "{}/",
-            .{core.ColorName.bright_blue},
-        ) catch unreachable;
-    }
-
     if (path.len >= home.len and std.mem.eql(u8, path[0..home.len], home)) {
         const is_link2 = blk: {
             _ = posix.readlink(home, &link_buf) catch |err| {
@@ -81,6 +68,11 @@ pub fn main(_: []const []const u8) core.Error {
         //_ = colorized_path.writer().write(color) catch unreachable;
         //  _ = colorized_path.writer().write("~") catch unreachable;
         path = path[home.len..];
+    } else if (path.len == 1) {
+        _ = colorized_path.writer().print(
+            "{}/",
+            .{core.ColorName.bright_blue},
+        ) catch unreachable;
     }
 
     var it = std.fs.path.componentIterator(path) catch unreachable;

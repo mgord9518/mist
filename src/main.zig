@@ -111,12 +111,36 @@ pub const Module = struct {
     no_display: bool,
 };
 
-pub const PluginMain = *const fn (
-    argc: usize,
-    argv: [*]?[*]const u8,
-    argvc: [*]usize,
-) callconv(.C) u8;
-//pub const PluginMain = *const fn () callconv(.C) usize;
+pub const Plugin = struct {
+    mainFn: MainFn,
+    dyn_lib: std.DynLib,
+
+    pub fn init(path: []const u8) !Plugin {
+        var dyn_lib = try std.DynLib.open(path);
+
+        const mainFn = dyn_lib.lookup(
+            MainFn,
+            "_MIST_PLUGIN_0_0_MAIN",
+        ) orelse return error.NotValidMistPlugin;
+
+        return .{
+            .mainFn = mainFn,
+            .dyn_lib = dyn_lib,
+        };
+    }
+
+    pub fn deinit(self: *Plugin) void {
+        self.dyn_lib.close();
+
+        self.* = undefined;
+    }
+
+    pub const MainFn = *const fn (
+        argc: usize,
+        argv: [*]const [*]const u8,
+        argvc: [*]usize,
+    ) callconv(.C) u8;
+};
 
 pub const module_list = blk: {
     const mod_decls = @typeInfo(modules).Struct.decls;
@@ -141,7 +165,7 @@ pub const module_list = blk: {
     break :blk std.StaticStringMap(Module).initComptime(list);
 };
 
-pub var plugin_list: std.StringHashMap(PluginMain) = undefined;
+pub var plugin_list: std.StringHashMap(Plugin) = undefined;
 
 pub const Help = struct {
     description: []const u8,
@@ -213,10 +237,14 @@ pub fn main() !void {
 }
 
 fn init(allocator: std.mem.Allocator) !void {
-    plugin_list = std.StringHashMap(PluginMain).init(allocator);
+    plugin_list = std.StringHashMap(Plugin).init(allocator);
 }
 
 fn deinit() !void {
+    for (plugin_list.items) |plugin| {
+        plugin.deinit();
+    }
+
     plugin_list.deinit();
 }
 
@@ -370,13 +398,6 @@ pub const ColorName = enum(u8) {
         );
     }
 };
-
-pub fn fg(comptime color: ColorName) [:0]const u8 {
-    return std.fmt.comptimePrint(
-        "\x1b[;{d}m",
-        .{@intFromEnum(color)},
-    );
-}
 
 pub const Signal = enum(u6) {
     hang_up = SIG.HUP,

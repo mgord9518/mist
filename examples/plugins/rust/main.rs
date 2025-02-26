@@ -5,7 +5,7 @@ use std::io::{self, Write};
 
 // Please have mercy, this is the first Rust code I've ever written
 #[no_mangle]
-pub extern "C" fn _MIST_PLUGIN_1_0_MAIN(
+pub extern "C" fn _MIST_PLUGIN_0_0_MAIN(
     arg_count: usize,
     arg_pointers: *const *const u8,
     arg_pointer_sizes: *const usize

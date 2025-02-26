@@ -28,9 +28,6 @@
         # This disables LD_LIBRARY_PATH mangling, binary patching etc...
         # The package won't be usable inside nix.
         zigDisableWrap = true;
-      } // optionalAttrs (!pathExists ./build.zig.zon) {
-        pname = "mist";
-        version = "0.0.0";
       }));
 
       # nix build .
@@ -60,21 +57,6 @@
 
       # nix run .#test
       apps.test = env.app [] "zig build test -- \"$@\"";
-
-      # nix run .#docs
-      apps.docs = env.app [] "zig build docs -- \"$@\"";
-
-      # nix run .#deps
-      apps.deps = env.showExternalDeps;
-
-      # nix run .#zon2json
-      apps.zon2json = env.app [env.zon2json] "zon2json \"$@\"";
-
-      # nix run .#zon2json-lock
-      apps.zon2json-lock = env.app [env.zon2json-lock] "zon2json-lock \"$@\"";
-
-      # nix run .#zon2nix
-      apps.zon2nix = env.app [env.zon2nix] "zon2nix \"$@\"";
 
       # nix develop
       devShells.default = env.mkShell {};

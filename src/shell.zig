@@ -10,12 +10,13 @@ const pipe = @import("shell/pipe.zig");
 const parser = @import("shell/parser.zig");
 const curses = @import("shell/curses.zig");
 const History = @import("shell/History.zig");
-const fg = core.fg;
 
 pub const exec_mode: core.ExecMode = .fork;
 
 pub var logical_path: []const u8 = undefined;
 pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+pub var debug_level: u2 = 3;
 
 // 1st byte: identifier. `P` for procedure
 // 2nd byte: u8, length of procedure name
@@ -340,14 +341,31 @@ pub fn printError(
     args: anytype,
 ) void {
     std.debug.print(
-        fg(.red) ++ "{d:>3} | {d} :: " ++ fg(.default),
-        .{ line_num, sep_idx },
+        "{}{d:>3} | {d} :: {}",
+        .{ core.ColorName.red, line_num, sep_idx, core.ColorName.default },
     );
 
     std.debug.print(
         fmt,
         args,
     );
+}
+
+pub fn debug(level: u2, str: []const u8) void {
+    if (level > debug_level) return;
+
+    switch (debug_level) {
+        0 => {},
+        3 => {
+            std.debug.print("{}::{} {s}{}\n", .{ core.ColorName.cyan, core.ColorName.default, str, core.ColorName.default });
+        },
+        2 => {
+            std.debug.print("{}::{} {s}{}\n", .{ core.ColorName.yellow, core.ColorName.default, str, core.ColorName.default });
+        },
+        1 => {
+            std.debug.print("{}::{} {s}{}\n", .{ core.ColorName.red, core.ColorName.default, str, core.ColorName.default });
+        },
+    }
 }
 
 fn handleInput(
@@ -472,14 +490,11 @@ fn handleInput(
     return true;
 }
 
-pub fn main(arguments: []const []const u8) core.Error {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
+fn init(_: std.mem.Allocator) !void {
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
-    var stdin_file = std.io.getStdIn();
+    const cwd = std.fs.cwd();
 
     shm = std.posix.mmap(
         null,
@@ -489,7 +504,34 @@ pub fn main(arguments: []const []const u8) core.Error {
         -1,
         0,
     ) catch unreachable;
-    defer std.posix.munmap(shm);
+
+    // TODO: support multiple plugins paths
+    if (std.posix.getenv("MIST_PLUGIN_PATH")) |plugin_path| {
+        var plugin_dir = try cwd.openDir(plugin_path, .{ .iterate = true });
+
+        var it = plugin_dir.iterate();
+        while (try it.next()) |entry| {
+            std.debug.print("ent: {s}\n", .{entry.name});
+        }
+    } else {
+        debug(2, "environment variable `MIST_PLUGIN_PATH` not set, no plugins will be automatically loaded");
+    }
+
+    core.usagePrint(stdout, greeting) catch unreachable;
+}
+
+fn deinit(_: std.mem.Allocator) void {
+    std.posix.munmap(shm);
+}
+
+pub fn main(arguments: []const []const u8) core.Error {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    init(allocator) catch unreachable;
+    defer deinit(allocator);
+
+    var stdin_file = std.io.getStdIn();
 
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
@@ -517,8 +559,6 @@ pub fn main(arguments: []const []const u8) core.Error {
         nonInteractiveLoop(script_path) catch unreachable;
         return .success;
     }
-
-    core.usagePrint(stdout, greeting) catch unreachable;
 
     core.disableSig(.interrupt) catch unreachable;
     core.disableSig(.quit) catch unreachable;

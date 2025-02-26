@@ -1,8 +1,8 @@
 const std = @import("std");
 
-export fn _MIST_PLUGIN_1_0_MAIN(
+export fn _MIST_PLUGIN_0_0_MAIN(
     arg_count: usize,
-    arg_pointers: [*][*:0]const u8,
+    arg_pointers: [*]const [*]const u8,
     arg_pointer_sizes: [*:0]usize,
 ) u8 {
     std.debug.print("Hello from Zig!\n", .{});

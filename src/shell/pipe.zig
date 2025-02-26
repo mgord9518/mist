@@ -22,7 +22,7 @@ pub const ChainRet = struct {
 
     pub const Status = packed struct(u16) {
         signal: core.Signal,
-        _7: u1 = undefined,
+        _6: u1 = undefined,
         core_dump: bool = false,
         exit_code: u8,
     };
@@ -173,15 +173,13 @@ pub fn chainCommands(
         // Execute command
         switch (command.kind) {
             .module => {
-                try posix.dup2(error_pipes[idx][1], 4);
-
                 if (core.module_list.get(command.name)) |mod| {
                     exit_code = @intFromEnum(mod.main(command.arguments));
-                }
+                } else unreachable;
             },
             .plugin => {
-                if (core.plugin_list.get(command.name)) |pluginMain| {
-                    var argv = try std.ArrayList(?[*]const u8).initCapacity(a, command.arguments.len + 1);
+                if (core.plugin_list.get(command.name)) |plugin| {
+                    var argv = try std.ArrayList([*]const u8).initCapacity(a, command.arguments.len + 1);
                     var argcv = try std.ArrayList(usize).initCapacity(a, command.arguments.len + 1);
                     defer argv.deinit();
                     defer argcv.deinit();
@@ -193,7 +191,11 @@ pub fn chainCommands(
                         try argcv.append(arg.len);
                     }
 
-                    exit_code = pluginMain(command.arguments.len + 1, argv.items.ptr, argcv.items.ptr);
+                    exit_code = plugin.mainFn(
+                        command.arguments.len + 1,
+                        argv.items.ptr,
+                        argcv.items.ptr,
+                    );
                 }
             },
             .system => {
