@@ -156,7 +156,6 @@ fn realMain(argv: []const []const u8) !void {
         } else {
             try prettyList(
                 dir,
-                target,
                 longest,
                 file_list.items,
                 single_column,
@@ -248,7 +247,7 @@ fn prettyListLong(dir: std.fs.Dir, target: []const u8, items: []const Entry) !vo
     _ = try stdout.print("{}", .{core.ColorName.default});
 }
 
-fn prettyList(dir: std.fs.Dir, target: []const u8, longest: usize, items: []const Entry, single_column: bool) !void {
+fn prettyList(dir: std.fs.Dir, longest: usize, items: []const Entry, single_column: bool) !void {
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
@@ -266,11 +265,6 @@ fn prettyList(dir: std.fs.Dir, target: []const u8, longest: usize, items: []cons
 
     var idx: usize = 0;
     var col: usize = 0;
-
-    try stdout.print(
-        "{}{?s}\n",
-        .{ core.ColorName.default, target },
-    );
 
     for (items) |entry| {
         const color = try colorFromKind(dir, entry);

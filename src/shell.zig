@@ -145,12 +145,13 @@ const Line = struct {
         }
 
         const cwd = std.fs.cwd();
-        var dir = try cwd.openDir(
+        var dir = cwd.openDir(
             parentPath(word),
             .{ .iterate = true },
-        );
+        ) catch return;
 
-        const basename = std.fs.path.basename(word);
+        var basename = std.fs.path.basename(word);
+        if (word.len > 0 and word[word.len - 1] == '/') basename = "";
 
         var dir_it = dir.iterate();
         while (try dir_it.next()) |entry| {
@@ -653,8 +654,10 @@ pub fn main(arguments: []const []const u8) core.Error {
 fn parentPath(path: []const u8) []const u8 {
     if (path.len == 0) return ".";
 
+    if (path[path.len - 1] == '/') return path;
+
     if (std.fs.path.dirname(path) == null) {
-        if (path[0] == '/') return "/";
+        if (path[path.len - 1] == '/') return path;
 
         return ".";
     }

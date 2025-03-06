@@ -18,17 +18,7 @@ pub fn build(b: *std.Build) void {
     // libraries built with Zig which are compiled with a release mode?
     // Debug builds crash... let's wait until DynLib becomes more stable and
     // plugins should be able to be written in anything supporting C ABI
-    //exe.linkLibC();
-
-    if (false) {
-        const zware_dep = b.dependency("zware", .{
-            .target = target,
-            .optimize = optimize,
-        });
-
-        const zware_module = zware_dep.module("zware");
-        exe.root_module.addImport("zware", zware_module);
-    }
+    exe.linkLibC();
 
     b.installArtifact(exe);
 
