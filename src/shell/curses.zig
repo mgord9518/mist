@@ -124,8 +124,8 @@ pub fn terminalSize() Size {
     );
 
     return .{
-        .w = ioctl.ws_col,
-        .h = ioctl.ws_row,
+        .w = ioctl.col,
+        .h = ioctl.row,
     };
 }
 

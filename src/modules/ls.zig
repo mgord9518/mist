@@ -170,7 +170,7 @@ fn colorFromKind(dir: std.fs.Dir, entry: Entry) !core.ColorName {
 
         // TODO: detect broken links
         .sym_link => blk: {
-            var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
             const link_target = try dir.readLink(entry.name, &buf);
 
             dir.access(link_target, .{}) catch |err| {

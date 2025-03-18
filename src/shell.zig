@@ -2,7 +2,6 @@ const std = @import("std");
 const posix = std.posix;
 const core = @import("main.zig");
 const time = @import("time.zig");
-const greeting = @embedFile("greeting");
 
 pub const modules = core.modules;
 
@@ -14,7 +13,7 @@ const History = @import("shell/History.zig");
 pub const exec_mode: core.ExecMode = .fork;
 
 pub var logical_path: []const u8 = undefined;
-pub var logical_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+pub var logical_path_buf: [std.fs.max_path_bytes]u8 = undefined;
 
 pub var debug_level: u2 = 3;
 
@@ -22,7 +21,7 @@ pub var debug_level: u2 = 3;
 // 2nd byte: u8, length of procedure name
 // Next 2 bytes: LE u16, length of procedure
 // Immediately followed by the procedure name, then the procedure contents
-pub var shm: []align(std.mem.page_size) u8 = undefined;
+pub var shm: []align(std.heap.page_size_min) u8 = undefined;
 
 pub const help = core.Help{
     .description = "minimal interactive shell. use `commands` for a list of built-in commands",
@@ -168,7 +167,7 @@ const Line = struct {
                 try line.insert("/");
             }
 
-            // TODO: allow selecting between all available
+            // TODO: allow selecting between all available files
             break;
         }
     }
@@ -380,15 +379,14 @@ fn handleInput(
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
-    var char = readCodepoint() catch unreachable;
+    const char = readCodepoint() catch unreachable;
 
-    switch (char) {
-        '\n' => {
+    if (char == .special) switch (char.special) {
+        .newline => {
             try stdout.print("\n", .{});
             print_prompt.* = true;
             current_line.*.pos = 0;
 
-            if (current_line.*.contents.items.len == 0) return false;
             if (std.mem.eql(
                 u8,
                 current_line.*.contents.items,
@@ -401,89 +399,73 @@ fn handleInput(
 
             return false;
         },
-        // Ctrl+l
-        '\x0c' => {
+        .ctrl_l => {
             _ = modules.clear.main(&.{});
             print_prompt.* = true;
             restart.* = true;
             return false;
         },
-        // Backspace
-        '\x7f' => {
-            print_handled.* = true;
-            if (current_line.*.pos > 0) {
-                current_line.*.backspace();
-            }
-        },
-        '\t' => {
+        .tab => {
             print_handled.* = true;
             try current_line.*.autoFinishWord(
                 allocator,
             );
         },
-        else => {},
-    }
+        .backspace => {
+            print_handled.* = true;
+            if (current_line.*.pos > 0) {
+                current_line.*.backspace();
+            }
+        },
+    };
 
     print_prompt.* = false;
 
-    // ANSI control
-    if (char == '\x1b') {
-        print_handled.* = true;
+    if (char == .escape_code) switch (char.escape_code) {
+        .up_arrow => {
+            if (history_cursor.* >= history.list.items.len) return true;
+            history_cursor.* += 1;
 
-        _ = getChar();
+            try current_line.*.replaceWith(history.list.items[history.list.items.len - history_cursor.*]);
 
-        char = readCodepoint() catch unreachable;
-        switch (char) {
-            // Up arrow
-            'A' => {
-                if (history_cursor.* >= history.list.items.len) return true;
-                history_cursor.* += 1;
+            return true;
+        },
+        .down_arrow => {
+            if (history_cursor.* > 0) history_cursor.* -= 1;
 
-                try current_line.*.replaceWith(history.list.items[history.list.items.len - history_cursor.*]);
+            current_line.*.contents.shrinkAndFree(0);
 
-                return true;
-            },
-            // Down arrow
-            'B' => {
-                if (history_cursor.* > 0) history_cursor.* -= 1;
+            if (history_cursor.* > 0) {
+                try current_line.*.contents.appendSlice(history.list.items[history.list.items.len - history_cursor.*]);
+            }
 
-                current_line.*.contents.shrinkAndFree(0);
+            curses.restorePosition();
+            curses.clearLine(.right);
 
-                if (history_cursor.* > 0) {
-                    try current_line.*.contents.appendSlice(history.list.items[history.list.items.len - history_cursor.*]);
-                    //try current_line.*.insert(history.list.items[history.list.items.len - history_cursor.*]);
-                }
+            try stdout.print("{s}", .{current_line.*.contents.items});
+            current_line.*.pos = current_line.*.contents.items.len;
+            return true;
+        },
+        .left_arrow => {
+            current_line.stepBackward();
 
-                curses.restorePosition();
-                curses.clearLine(.right);
+            return true;
+        },
+        .right_arrow => {
+            if (current_line.*.pos < current_line.*.contents.items.len) {
+                current_line.*.stepForward();
+            }
 
-                try stdout.print("{s}", .{current_line.*.contents.items});
-                current_line.*.pos = current_line.*.contents.items.len;
-                return true;
-            },
-            'C' => {
-                if (current_line.*.pos < current_line.*.contents.items.len) {
-                    current_line.*.stepForward();
-                }
-
-                return true;
-            },
-            'D' => {
-                current_line.stepBackward();
-
-                return true;
-            },
-            else => {},
-        }
-    }
+            return true;
+        },
+        // TODO
+        else => unreachable,
+    };
 
     // Insert a single UTF-8 codepoint
     if (!print_handled.*) {
         var buf: [4]u8 = undefined;
-        const len = std.unicode.utf8Encode(char, &buf) catch unreachable;
-
-        const size = curses.terminalSize();
-        _ = size;
+        const len = try std.unicode.utf8Encode(char.codepoint, &buf);
 
         try current_line.*.insert(buf[0..len]);
     }
@@ -492,14 +474,11 @@ fn handleInput(
 }
 
 fn init(_: std.mem.Allocator) !void {
-    const stdout_file = std.io.getStdOut();
-    const stdout = stdout_file.writer();
-
     const cwd = std.fs.cwd();
 
     shm = std.posix.mmap(
         null,
-        4096,
+        std.heap.page_size_min,
         std.posix.PROT.READ | std.posix.PROT.WRITE,
         .{ .TYPE = .SHARED, .ANONYMOUS = true },
         -1,
@@ -517,19 +496,29 @@ fn init(_: std.mem.Allocator) !void {
     } else {
         debug(2, "environment variable `MIST_PLUGIN_PATH` not set, no plugins will be automatically loaded");
     }
-
-    core.usagePrint(stdout, greeting) catch unreachable;
 }
 
 fn deinit(_: std.mem.Allocator) void {
     std.posix.munmap(shm);
 }
 
-pub fn main(arguments: []const []const u8) core.Error {
+fn printPrompt() !void {
+    if (@hasDecl(modules, "prompt")) {
+        _ = modules.prompt.main(&.{});
+    } else {
+        const stdout = std.io.getStdOut();
+
+        try stdout.writer().print(" > ", .{});
+    }
+}
+
+pub const main = core.genericMain(realMain);
+
+pub fn realMain(arguments: []const []const u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    init(allocator) catch unreachable;
+    try init(allocator);
     defer deinit(allocator);
 
     var stdin_file = std.io.getStdIn();
@@ -539,9 +528,9 @@ pub fn main(arguments: []const []const u8) core.Error {
         target = arg;
     }
 
-    logical_path = std.posix.getcwd(
+    logical_path = try std.posix.getcwd(
         &logical_path_buf,
-    ) catch return .cwd_not_found;
+    );
 
     variables = std.BufMap.init(allocator);
     defer variables.deinit();
@@ -552,17 +541,17 @@ pub fn main(arguments: []const []const u8) core.Error {
     defer procedures.deinit();
 
     if (target) |script_path| {
-        variables.put(
+        try variables.put(
             "0",
             script_path,
-        ) catch {};
+        );
 
-        nonInteractiveLoop(script_path) catch unreachable;
-        return .success;
+        try nonInteractiveLoop(script_path);
+        return;
     }
 
-    core.disableSig(.interrupt) catch unreachable;
-    core.disableSig(.quit) catch unreachable;
+    try core.disableSig(.interrupt);
+    try core.disableSig(.quit);
 
     var print_prompt = true;
 
@@ -575,21 +564,21 @@ pub fn main(arguments: []const []const u8) core.Error {
 
     // Main loop
     while (true) {
-        interactiveLoop() catch return .unknown_error;
+        try interactiveLoop();
 
         var buf: [3]u8 = undefined;
 
-        variables.put(
+        try variables.put(
             "mist.status",
-            std.fmt.bufPrint(
+            try std.fmt.bufPrint(
                 &buf,
                 "{d}",
                 .{previous_status},
-            ) catch unreachable,
-        ) catch {};
+            ),
+        );
 
         if (previous_status_name) |name| {
-            variables.put("mist.status.name", name) catch {};
+            try variables.put("mist.status.name", name);
         } else {
             _ = variables.remove("mist.status.name");
         }
@@ -598,7 +587,7 @@ pub fn main(arguments: []const []const u8) core.Error {
         var history_cursor: usize = 0;
 
         if (print_prompt) {
-            _ = modules.prompt.main(&.{});
+            try printPrompt();
             curses.savePosition();
         }
 
@@ -616,35 +605,35 @@ pub fn main(arguments: []const []const u8) core.Error {
         while (should_continue) {
             var print_handled = false;
 
-            should_continue = handleInput(
+            should_continue = try handleInput(
                 allocator,
                 &print_prompt,
                 &current_line,
                 &restart,
                 &history_cursor,
                 &print_handled,
-            ) catch unreachable;
+            );
         }
 
         if (restart) continue;
 
-        curses.setTerminalMode(.normal) catch return .unknown_error;
+        try curses.setTerminalMode(.normal);
 
-        const exit_status = runLine(
+        const exit_status = try runLine(
             allocator,
             stdin_file.reader(),
             current_line.contents.items,
             true,
-        ) catch unreachable;
+        );
 
-        variables.put(
+        try variables.put(
             "mist.status.index",
-            std.fmt.bufPrint(
+            try std.fmt.bufPrint(
                 &buf,
                 "{d}",
                 .{exit_status.idx},
-            ) catch unreachable,
-        ) catch {};
+            ),
+        );
 
         previous_status_name = statusName(exit_status.ret);
         previous_status = statusCode(exit_status.ret);
@@ -703,20 +692,58 @@ fn utf8ContinueLen(byte: u8) u2 {
     };
 }
 
-fn getChar() u8 {
-    const stdin = std.io.getStdIn().reader();
+const Key = union(enum) {
+    codepoint: u21,
+    special: Special,
+    escape_code: EscapeCode,
 
-    var buf: [1]u8 = undefined;
-    _ = stdin.read(&buf) catch {
-        std.debug.print("getChar FAIL {d} `{c}`\n", .{ buf[0], buf[0] });
-        unreachable;
+    const Special = enum(u7) {
+        tab = '\t',
+        newline = '\n',
+        ctrl_l = '\x0c',
+        backspace = '\x7f',
     };
 
-    return buf[0];
-}
+    const EscapeCode = enum {
+        ctrl_left_arrow,
+        ctrl_right_arrow,
 
-fn readCodepoint() !u21 {
-    const char = getChar();
+        up_arrow,
+        down_arrow,
+        left_arrow,
+        right_arrow,
+    };
+
+    fn charToSpecial(char: u8) ?Special {
+        return std.meta.intToEnum(Special, char) catch null;
+    }
+};
+
+fn readCodepoint() !Key {
+    const stdin = std.io.getStdIn();
+
+    const char = try stdin.reader().readByte();
+
+    if (Key.charToSpecial(char)) |special| {
+        return .{ .special = special };
+    }
+
+    if (char == '\x1b') {
+        // Disregard next byte
+        // TODO: assert to be `[`
+        _ = try stdin.reader().readByte();
+
+        const escape_code: Key.EscapeCode = switch (try stdin.reader().readByte()) {
+            'A' => .up_arrow,
+            'B' => .down_arrow,
+            'C' => .right_arrow,
+            'D' => .left_arrow,
+
+            else => return error.UnknownEscapeCode,
+        };
+
+        return .{ .escape_code = escape_code };
+    }
 
     var utf8_buf: [4]u8 = undefined;
     utf8_buf[0] = char;
@@ -724,8 +751,10 @@ fn readCodepoint() !u21 {
     const continue_len: u3 = utf8ContinueLen(char);
 
     for (utf8_buf[1..][0..continue_len], 1..) |_, idx| {
-        utf8_buf[idx] = getChar();
+        utf8_buf[idx] = try stdin.reader().readByte();
     }
 
-    return std.unicode.utf8Decode(utf8_buf[0 .. continue_len + 1]);
+    return Key{
+        .codepoint = try std.unicode.utf8Decode(utf8_buf[0 .. continue_len + 1]),
+    };
 }

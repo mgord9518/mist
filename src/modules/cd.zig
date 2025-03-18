@@ -12,7 +12,7 @@ pub const help = core.Help{
 };
 
 var previous_dir: ?[]const u8 = null;
-var previous_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+var previous_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
 
 pub const main = core.genericMain(realMain);
 
@@ -75,7 +75,7 @@ fn realMain(argv: []const []const u8) !void {
 }
 
 fn resolveLogicalPath(sub_dir: []const u8) !void {
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buf);
     const allocator = fba.allocator();
 

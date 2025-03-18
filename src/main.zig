@@ -143,7 +143,7 @@ pub const Plugin = struct {
 };
 
 pub const module_list = blk: {
-    const mod_decls = @typeInfo(modules).Struct.decls;
+    const mod_decls = @typeInfo(modules).@"struct".decls;
 
     const T = std.meta.Tuple(&.{ []const u8, Module });
     var list: [mod_decls.len]T = undefined;
@@ -437,7 +437,7 @@ fn sigImpl(signal: Signal, enable: bool) !void {
         .flags = 0,
     };
 
-    try posix.sigaction(
+    posix.sigaction(
         @intFromEnum(signal),
         &action,
         null,

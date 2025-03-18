@@ -1,16 +1,15 @@
 .{
-    .name = "mist",
-    .version = "0.0.8",
+    .name = .mist,
+    .version = "0.0.10",
+    .fingerprint = 0xfc749f7d6fe8db38,
 
-    .minimum_zig_version = "0.13.0",
-    .dependencies = .{
-        //        .base91 = .{
-        //            .url = "https://github.com/mgord9518/base91-zig/archive/refs/tags/continuous.tar.gz",
-        //            .hash = "1220920ba701d7f6f846593ccb646c27f56499819e6b53fe46bbd9d4beaa6408b846",
-        //        },
-    },
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{},
 
     .paths = .{
-        "",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
     },
 }

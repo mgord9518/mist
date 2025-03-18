@@ -72,8 +72,8 @@ fn realMain(argv: []const []const u8) !void {
                 shell.debug(3, "plugin loaded correctly");
             },
             .install => {
-                var data_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-                var mist_dir_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                var data_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+                var mist_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
 
                 const data_dir = std.posix.getenv("XDG_DATA_HOME") orelse blk: {
                     const home = std.posix.getenv("HOME") orelse return error.FileNotFound;
@@ -88,7 +88,7 @@ fn realMain(argv: []const []const u8) !void {
 
                 try cwd.makePath(mist_dir);
 
-                var plugin_name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                var plugin_name_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const plugin_name = try std.fmt.bufPrint(
                     &plugin_name_buf,
                     "{s}/{s}",

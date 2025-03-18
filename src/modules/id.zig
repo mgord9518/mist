@@ -190,7 +190,7 @@ const PasswdIterator = struct {
             null,
         );
 
-        var split = std.mem.split(u8, it.list.items, ":");
+        var split = std.mem.splitScalar(u8, it.list.items, ':');
 
         return .{
             .username = split.next() orelse return eol,
