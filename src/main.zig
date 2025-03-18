@@ -213,27 +213,13 @@ pub fn main() !void {
     try init(allocator);
 
     const argv = std.os.argv;
-    const argv0 = std.mem.sliceTo(argv[0], 0);
 
     var args = std.ArrayList([]const u8).init(allocator);
     for (argv) |arg| {
         try args.append(std.mem.sliceTo(arg, 0));
     }
 
-    const print_help = false;
-
-    const basename = std.fs.path.basename(argv0);
-
-    if (module_list.get(basename)) |mod| {
-        if (print_help) {
-            try printHelp(basename, mod.help);
-            return;
-        }
-
-        _ = mod.main(args.items[1..]);
-    } else {
-        @panic("Module not found!");
-    }
+    _ = modules.mist.main(args.items[1..]);
 }
 
 fn init(allocator: std.mem.Allocator) !void {
@@ -426,8 +412,12 @@ pub const Signal = enum(u6) {
     virtual_alarm = SIG.VTALRM,
 };
 
+fn handle(_: i32) callconv(.C) void {
+    //std.debug.print("handle!", .{});
+}
+
 fn sigImpl(signal: Signal, enable: bool) !void {
-    const handler = if (enable) SIG.DFL else SIG.IGN;
+    const handler = if (enable) SIG.DFL else &handle;
 
     var action = posix.Sigaction{
         .handler = .{

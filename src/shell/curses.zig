@@ -116,7 +116,7 @@ pub const Vector = struct {
 };
 
 pub fn terminalSize() Size {
-    var ioctl: std.posix.system.winsize = undefined;
+    var ioctl: std.posix.winsize = undefined;
     _ = std.posix.system.ioctl(
         std.posix.STDOUT_FILENO,
         std.posix.T.IOCGWINSZ,

@@ -115,12 +115,12 @@ const Line = struct {
 
     // Tab-finish, auto-fills the "word" that contians the cursor if a matching
     // filename is found
-    fn autoFinishWord(
-        line: *Line,
-        allocator: std.mem.Allocator,
-    ) !void {
+    fn autoFinishWord(line: *Line) !void {
+        var arena = std.heap.ArenaAllocator.init(line.contents.allocator);
+        defer arena.deinit();
+
         var it = try parser.SyntaxIterator.init(
-            allocator,
+            arena.allocator(),
             line.contents.items,
         );
         defer it.deinit();
@@ -135,7 +135,6 @@ const Line = struct {
             }
 
             if (line.pos < token_start or line.pos > it.pos) {
-                allocator.free(token.string);
                 continue;
             }
 
@@ -330,8 +329,74 @@ pub fn nonInteractiveLoop(script_path: []const u8) !void {
     }
 }
 
-pub fn interactiveLoop() !void {
+pub fn interactiveLoop(allocator: std.mem.Allocator, previous_status: *u8, previous_status_name: *?[]const u8, print_prompt: *bool) !void {
+    var stdin_file = std.io.getStdIn();
+
     try curses.setTerminalMode(.raw);
+
+    var buf: [3]u8 = undefined;
+
+    try variables.put(
+        "mist.status",
+        try std.fmt.bufPrint(
+            &buf,
+            "{d}",
+            .{previous_status.*},
+        ),
+    );
+
+    if (previous_status_name.*) |name| {
+        try variables.put("mist.status.name", name);
+    } else {
+        _ = variables.remove("mist.status.name");
+    }
+
+    if (print_prompt.*) {
+        try printPrompt();
+        curses.savePosition();
+    }
+
+    var line = std.ArrayList(u8).init(allocator);
+    defer line.deinit();
+
+    var current_line = Line{
+        .contents = line,
+        .pos = 0,
+    };
+
+    var restart = false;
+    var should_continue = true;
+
+    while (should_continue) {
+        should_continue = try handleInput(
+            print_prompt,
+            &current_line,
+            &restart,
+        );
+    }
+
+    if (restart) return;
+
+    try curses.setTerminalMode(.normal);
+
+    const exit_status = try runLine(
+        allocator,
+        stdin_file.reader(),
+        current_line.contents.items,
+        true,
+    );
+
+    try variables.put(
+        "mist.status.index",
+        try std.fmt.bufPrint(
+            &buf,
+            "{d}",
+            .{exit_status.idx},
+        ),
+    );
+
+    previous_status_name.* = statusName(exit_status.ret);
+    previous_status.* = statusCode(exit_status.ret);
 }
 
 pub fn printError(
@@ -369,19 +434,18 @@ pub fn debug(level: u2, str: []const u8) void {
 }
 
 fn handleInput(
-    allocator: std.mem.Allocator,
     print_prompt: *bool,
     current_line: *Line,
     restart: *bool,
-    history_cursor: *usize,
-    print_handled: *bool,
 ) !bool {
+    var print_handled = false;
+
     const stdout_file = std.io.getStdOut();
     const stdout = stdout_file.writer();
 
-    const char = readCodepoint() catch unreachable;
+    const key = readKey() catch unreachable;
 
-    if (char == .special) switch (char.special) {
+    if (key == .special) switch (key.special) {
         .newline => {
             try stdout.print("\n", .{});
             print_prompt.* = true;
@@ -406,13 +470,11 @@ fn handleInput(
             return false;
         },
         .tab => {
-            print_handled.* = true;
-            try current_line.*.autoFinishWord(
-                allocator,
-            );
+            print_handled = true;
+            try current_line.*.autoFinishWord();
         },
         .backspace => {
-            print_handled.* = true;
+            print_handled = true;
             if (current_line.*.pos > 0) {
                 current_line.*.backspace();
             }
@@ -421,22 +483,22 @@ fn handleInput(
 
     print_prompt.* = false;
 
-    if (char == .escape_code) switch (char.escape_code) {
+    if (key == .escape_code) switch (key.escape_code) {
         .up_arrow => {
-            if (history_cursor.* >= history.list.items.len) return true;
-            history_cursor.* += 1;
+            if (history.cursor >= history.list.items.len) return true;
+            history.cursor += 1;
 
-            try current_line.*.replaceWith(history.list.items[history.list.items.len - history_cursor.*]);
+            try current_line.*.replaceWith(history.list.items[history.list.items.len - history.cursor]);
 
             return true;
         },
         .down_arrow => {
-            if (history_cursor.* > 0) history_cursor.* -= 1;
+            if (history.cursor > 0) history.cursor -= 1;
 
             current_line.*.contents.shrinkAndFree(0);
 
-            if (history_cursor.* > 0) {
-                try current_line.*.contents.appendSlice(history.list.items[history.list.items.len - history_cursor.*]);
+            if (history.cursor > 0) {
+                try current_line.*.contents.appendSlice(history.list.items[history.list.items.len - history.cursor]);
             }
 
             curses.restorePosition();
@@ -458,14 +520,15 @@ fn handleInput(
 
             return true;
         },
+
         // TODO
-        else => unreachable,
+        else => return true,
     };
 
     // Insert a single UTF-8 codepoint
-    if (!print_handled.*) {
+    if (!print_handled) {
         var buf: [4]u8 = undefined;
-        const len = try std.unicode.utf8Encode(char.codepoint, &buf);
+        const len = try std.unicode.utf8Encode(key.codepoint, &buf);
 
         try current_line.*.insert(buf[0..len]);
     }
@@ -521,8 +584,6 @@ pub fn realMain(arguments: []const []const u8) !void {
     try init(allocator);
     defer deinit(allocator);
 
-    var stdin_file = std.io.getStdIn();
-
     var target: ?[]const u8 = null;
     for (arguments) |arg| {
         target = arg;
@@ -564,79 +625,7 @@ pub fn realMain(arguments: []const []const u8) !void {
 
     // Main loop
     while (true) {
-        try interactiveLoop();
-
-        var buf: [3]u8 = undefined;
-
-        try variables.put(
-            "mist.status",
-            try std.fmt.bufPrint(
-                &buf,
-                "{d}",
-                .{previous_status},
-            ),
-        );
-
-        if (previous_status_name) |name| {
-            try variables.put("mist.status.name", name);
-        } else {
-            _ = variables.remove("mist.status.name");
-        }
-
-        // How many entries to travel up the history
-        var history_cursor: usize = 0;
-
-        if (print_prompt) {
-            try printPrompt();
-            curses.savePosition();
-        }
-
-        var line = std.ArrayList(u8).init(allocator);
-        defer line.deinit();
-
-        var current_line = Line{
-            .contents = line,
-            .pos = 0,
-        };
-
-        var restart = false;
-        var should_continue = true;
-
-        while (should_continue) {
-            var print_handled = false;
-
-            should_continue = try handleInput(
-                allocator,
-                &print_prompt,
-                &current_line,
-                &restart,
-                &history_cursor,
-                &print_handled,
-            );
-        }
-
-        if (restart) continue;
-
-        try curses.setTerminalMode(.normal);
-
-        const exit_status = try runLine(
-            allocator,
-            stdin_file.reader(),
-            current_line.contents.items,
-            true,
-        );
-
-        try variables.put(
-            "mist.status.index",
-            try std.fmt.bufPrint(
-                &buf,
-                "{d}",
-                .{exit_status.idx},
-            ),
-        );
-
-        previous_status_name = statusName(exit_status.ret);
-        previous_status = statusCode(exit_status.ret);
+        try interactiveLoop(allocator, &previous_status, &previous_status_name, &print_prompt);
     }
 }
 
@@ -705,6 +694,8 @@ const Key = union(enum) {
     };
 
     const EscapeCode = enum {
+        ctrl_up_arrow,
+        ctrl_down_arrow,
         ctrl_left_arrow,
         ctrl_right_arrow,
 
@@ -719,7 +710,7 @@ const Key = union(enum) {
     }
 };
 
-fn readCodepoint() !Key {
+fn readKey() !Key {
     const stdin = std.io.getStdIn();
 
     const char = try stdin.reader().readByte();
@@ -731,13 +722,17 @@ fn readCodepoint() !Key {
     if (char == '\x1b') {
         // Disregard next byte
         // TODO: assert to be `[`
-        _ = try stdin.reader().readByte();
+        if (try stdin.reader().readByte() != '[') {
+            return error.UnknownEscapeCode;
+        }
 
         const escape_code: Key.EscapeCode = switch (try stdin.reader().readByte()) {
             'A' => .up_arrow,
             'B' => .down_arrow,
             'C' => .right_arrow,
             'D' => .left_arrow,
+
+            '1' => try finishReadingCsi(),
 
             else => return error.UnknownEscapeCode,
         };
@@ -757,4 +752,27 @@ fn readCodepoint() !Key {
     return Key{
         .codepoint = try std.unicode.utf8Decode(utf8_buf[0 .. continue_len + 1]),
     };
+}
+
+fn finishReadingCsi() !Key.EscapeCode {
+    const stdin = std.io.getStdIn();
+
+    if (try stdin.reader().readByte() != ';') {
+        return error.UnknownEscapeCode;
+    }
+
+    const escape_code: Key.EscapeCode = switch (try stdin.reader().readByte()) {
+        '5' => switch (try stdin.reader().readByte()) {
+            'A' => .ctrl_up_arrow,
+            'B' => .ctrl_down_arrow,
+            'C' => .ctrl_right_arrow,
+            'D' => .ctrl_left_arrow,
+
+            else => return error.UnknownCsiEscapeCode,
+        },
+
+        else => return error.UnknownCsiEscapeCode,
+    };
+
+    return escape_code;
 }
