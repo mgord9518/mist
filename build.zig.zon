@@ -1,6 +1,6 @@
 .{
     .name = .mist,
-    .version = "0.0.12",
+    .version = "0.0.13",
     .fingerprint = 0xfc749f7d6fe8db38,
 
     .minimum_zig_version = "0.14.0",

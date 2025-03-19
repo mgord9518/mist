@@ -9,6 +9,7 @@ const pipe = @import("shell/pipe.zig");
 const parser = @import("shell/parser.zig");
 const curses = @import("shell/curses.zig");
 const History = @import("shell/History.zig");
+const Tokenizer = @import("shell/Tokenizer.zig");
 
 pub const exec_mode: core.ExecMode = .fork;
 
@@ -116,30 +117,19 @@ const Line = struct {
     // Tab-finish, auto-fills the "word" that contians the cursor if a matching
     // filename is found
     fn autoFinishWord(line: *Line) !void {
-        var arena = std.heap.ArenaAllocator.init(line.contents.allocator);
-        defer arena.deinit();
+        var fbs = std.io.fixedBufferStream(line.contents.items);
 
-        var it = try parser.SyntaxIterator.init(
-            arena.allocator(),
-            line.contents.items,
-        );
-        defer it.deinit();
+        var tokenizer = Tokenizer.init(line.contents.allocator, fbs.reader().any());
+        defer tokenizer.deinit();
 
-        var token_start: usize = 0;
-        var word: []const u8 = "";
+        var word: []const u8 = ".";
+        var word_buf: [std.fs.max_path_bytes]u8 = undefined;
 
-        while (try it.nextToken()) |token| {
-            if (token != .string) {
-                token_start = it.pos;
-                continue;
-            }
+        while (try tokenizer.next()) |token| {
+            if (token.len > std.fs.max_path_bytes) continue;
 
-            if (line.pos < token_start or line.pos > it.pos) {
-                continue;
-            }
-
-            token_start = it.pos;
-            word = token.string;
+            @memcpy(word_buf[0..token.len], token);
+            word = word_buf[0..token.len];
         }
 
         const cwd = std.fs.cwd();
